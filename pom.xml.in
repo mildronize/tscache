@@ -90,7 +90,7 @@
           <execution>
             <id>generate-build-data</id>
             <configuration>
-              <executable>build-aux/gen_build_data.sh</executable>
+              <executable>build-aux/gen_build_data.bat</executable>
               <!-- optional -->
               <arguments>
                 <argument>target/generated-sources/net/opentsdb/tools/BuildData.java</argument>
