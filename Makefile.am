@@ -146,6 +146,8 @@ tsdb_SRC := \
 	src/tsd/AbstractHttpQuery.java	\
 	src/tsd/AnnotationRpc.java	\
 	src/tsd/BadRequestException.java	\
+	src/tsd/Cache.java	\
+	src/tsd/CacheFragment.java	\
 	src/tsd/ConnectionManager.java	\
 	src/tsd/DropCachesRpc.java \
 	src/tsd/GnuplotException.java	\
