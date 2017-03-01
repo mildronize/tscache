@@ -34,10 +34,20 @@ final class CacheFragment{
 
   HttpQuery query;
   ArrayList<DataPoints[]> dataPoints;
+  private boolean exist;
 
-  public CacheFragment(final HttpQuery query, final  ArrayList<DataPoints[]> dataPoints){
+  public CacheFragment(final HttpQuery query, final  ArrayList<DataPoints[]> dataPoints, final boolean exist){
     this.query = query;
     this.dataPoints = dataPoints;
+    this.exist = exist;
+  }
+
+  public boolean isExist(){
+    return exist;
+  }
+
+  public HttpQuery getQuery(){
+    return query;
   }
 
 }

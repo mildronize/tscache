@@ -42,7 +42,7 @@ final class Cache{
   }
 
   private void makeFragments(final HttpQuery query){
-    fragments.add(new CacheFragment(query, null));
+    fragments.add(new CacheFragment(query, null, false));
   }
 
   ArrayList<CacheFragment> getFragments(){

@@ -21,6 +21,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
+import net.opentsdb.core.*;
 import org.hbase.async.HBaseException;
 import org.hbase.async.RpcTimedOutException;
 import org.hbase.async.Bytes.ByteMap;
@@ -34,15 +35,6 @@ import com.stumbleupon.async.Callback;
 import com.stumbleupon.async.Deferred;
 import com.stumbleupon.async.DeferredGroupException;
 
-import net.opentsdb.core.DataPoints;
-import net.opentsdb.core.IncomingDataPoint;
-import net.opentsdb.core.Query;
-import net.opentsdb.core.QueryException;
-import net.opentsdb.core.RateOptions;
-import net.opentsdb.core.TSDB;
-import net.opentsdb.core.TSQuery;
-import net.opentsdb.core.TSSubQuery;
-import net.opentsdb.core.Tags;
 import net.opentsdb.meta.Annotation;
 import net.opentsdb.meta.TSUIDQuery;
 import net.opentsdb.query.expression.ExpressionTree;
@@ -74,8 +66,6 @@ final class QueryRpc implements HttpRpc {
   static final AtomicLong query_invalid = new AtomicLong();
   static final AtomicLong query_exceptions = new AtomicLong();
   static final AtomicLong query_success = new AtomicLong();
-
-  private final ArrayList<DataPoints[]> global_results = new ArrayList<DataPoints[]>();
 
   /**
    * Implements the /api/query endpoint to fetch data from OpenTSDB.
@@ -136,67 +126,40 @@ final class QueryRpc implements HttpRpc {
       handleExpressionQuery(tsdb, query);
       return;
     } else {
-//      handleQuery(tsdb, query, false);
-
+      // handleQuery(tsdb, query, false);
       // Enable cache
-      // Call... getDataPointsFromQuery() + sendData() === handleQuery()
-
-      Cache cache= new Cache(query);
-      ArrayList<CacheFragment> fragments = cache.getFragments();
-      for(CacheFragment fragment : fragments){
-        if (fragment.dataPoints == null ) {
-          try {
-            handleQueryV2(tsdb, fragment.query, false, false);
-          } catch (Exception e){
-            LOG.error(e.toString());
-          }
-        }else
-          global_results.addAll(fragment.dataPoints);
-      }
-      // After finish all queries, send back to users
-      try {
-        handleQueryV2(tsdb, query, false, true);
-      } catch (Exception e){
-        LOG.error(e.toString());
-      }
+      handleQueryWithCache(tsdb, query, false);
     }
   }
 
   /**
-   * Another processing for a data point query
+   * Processing for a data point query with cache
    * @param tsdb The TSDB to which we belong
    * @param query The HTTP query to parse/respond
    * @param allow_expressions Whether or not expressions should be parsed
-   * @param allow_send Whether or not sending the data to user should be parsed
    * (based on the endpoint)
    */
-  private void handleQueryV2(final TSDB tsdb, final HttpQuery query,
-                           final boolean allow_expressions, final boolean allow_send) throws Exception {
+  private void handleQueryWithCache(final TSDB tsdb, final HttpQuery query,
+                                    final boolean allow_expressions){
+
+    // Try to act like `handleQuery`
+    // Call... processSubQuery() + SubmitQueryCB() === handleQuery()
+
     final long start = DateTime.currentTimeMillis();
     final TSQuery data_query;
-    final List<ExpressionTree> expressions;
-    if (query.method() == HttpMethod.POST) {
-      switch (query.apiVersion()) {
-        case 0:
-        case 1:
-          data_query = query.serializer().parseQueryV1();
-          break;
-        default:
-          query_invalid.incrementAndGet();
-          throw new BadRequestException(HttpResponseStatus.NOT_IMPLEMENTED,
-            "Requested API version not implemented", "Version " +
-            query.apiVersion() + " is not implemented");
-      }
-      expressions = null;
-    } else {
-      expressions = new ArrayList<ExpressionTree>();
-      data_query = parseQuery(tsdb, query, expressions);
+    final List<ExpressionTree> expressions = new ArrayList<ExpressionTree>();
+    // TODO:  Check for Annotations (!data_query.getNoAnnotations() && data_query.getGlobalAnnotations()) // if we the caller wants to search for global annotations, used `handleQuery`
+
+    // Cache only GET method, otherwise bypass to existing `handleQuery`
+    if (query.method() == HttpMethod.POST || query.getAPIMethod() == HttpMethod.DELETE){
+      handleQuery(tsdb, query, false);
+      return;
     }
 
-    if (query.getAPIMethod() == HttpMethod.DELETE &&
-      tsdb.getConfig().getBoolean("tsd.http.query.allow_delete")) {
-      data_query.setDelete(true);
-    }
+    data_query = parseQuery(tsdb, query, expressions); // Don't use POST method
+
+    LOG.debug(query.method().toString());
+    // Make sure the cache handle GET method only
 
     // validate and then compile the queries
     try {
@@ -215,63 +178,162 @@ final class QueryRpc implements HttpRpc {
     data_query.setQueryStats(query_stats);
     query.setStats(query_stats);
 
-    final int nqueries = data_query.getQueries().size();
-    final ArrayList<DataPoints[]> results = new ArrayList<DataPoints[]>(nqueries);
+    //-- --
+
+    Cache cache= new Cache(query);
+    ArrayList<CacheFragment> fragments = cache.getFragments();
+
+    final ArrayList<Deferred<ArrayList<DataPoints[]>>> deferreds = new ArrayList<Deferred<ArrayList<DataPoints[]>>>();
+    final ArrayList<DataPoints[]> results = new ArrayList<DataPoints[]>();
+
+    for(CacheFragment fragment : fragments) {
+//      if(fragment.isExist())
+//        deferreds.add(fragment.processCache());
+//      else
+      try {
+        deferreds.add(processSubQuery(tsdb, fragment.getQuery(), false));
+      }catch (Exception e){
+        LOG.error("processSubQuery Exception" +  e);
+      }
+    }
+
     final List<Annotation> globals = new ArrayList<Annotation>();
 
-    /** This has to be attached to callbacks or we may never respond to clients */
-    class ErrorCB implements Callback<Object, Exception> {
-      public Object call(final Exception e) throws Exception {
-        Throwable ex = e;
-        try {
-          LOG.error("Query exception: ", e);
-          if (ex instanceof DeferredGroupException) {
-            ex = e.getCause();
-            while (ex != null && ex instanceof DeferredGroupException) {
-              ex = ex.getCause();
-            }
-            if (ex == null) {
-              LOG.error("The deferred group exception didn't have a cause???");
-            }
-          }
+    class SubmitQueryCB implements Callback<Object, ArrayList<ArrayList<DataPoints[]>> > {
+      public Object call(final ArrayList<ArrayList<DataPoints[]>> query_results) throws Exception {
+        /** This has to be attached to callbacks or we may never respond to clients */
+        class ErrorCB implements Callback<Object, Exception> {
+          public Object call(final Exception e) throws Exception {
+            Throwable ex = e;
+            try {
+              LOG.error("Query exception: ", e);
+              if (ex instanceof DeferredGroupException) {
+                ex = e.getCause();
+                while (ex != null && ex instanceof DeferredGroupException) {
+                  ex = ex.getCause();
+                }
+                if (ex == null) {
+                  LOG.error("The deferred group exception didn't have a cause???");
+                }
+              }
 
-          if (ex instanceof RpcTimedOutException) {
-            query_stats.markSerialized(HttpResponseStatus.REQUEST_TIMEOUT, ex);
-            query.badRequest(new BadRequestException(
-              HttpResponseStatus.REQUEST_TIMEOUT, ex.getMessage()));
-            query_exceptions.incrementAndGet();
-          } else if (ex instanceof HBaseException) {
-            query_stats.markSerialized(HttpResponseStatus.FAILED_DEPENDENCY, ex);
-            query.badRequest(new BadRequestException(
-              HttpResponseStatus.FAILED_DEPENDENCY, ex.getMessage()));
-            query_exceptions.incrementAndGet();
-          } else if (ex instanceof QueryException) {
-            query_stats.markSerialized(((QueryException)ex).getStatus(), ex);
-            query.badRequest(new BadRequestException(
-              ((QueryException)ex).getStatus(), ex.getMessage()));
-            query_exceptions.incrementAndGet();
-          } else if (ex instanceof BadRequestException) {
-            query_stats.markSerialized(((BadRequestException)ex).getStatus(), ex);
-            query.badRequest((BadRequestException)ex);
-            query_invalid.incrementAndGet();
-          } else if (ex instanceof NoSuchUniqueName) {
-            query_stats.markSerialized(HttpResponseStatus.BAD_REQUEST, ex);
-            query.badRequest(new BadRequestException(ex));
-            query_invalid.incrementAndGet();
-          } else {
-            query_stats.markSerialized(HttpResponseStatus.INTERNAL_SERVER_ERROR, ex);
-            query.badRequest(new BadRequestException(ex));
-            query_exceptions.incrementAndGet();
-          }
+              if (ex instanceof RpcTimedOutException) {
+                query_stats.markSerialized(HttpResponseStatus.REQUEST_TIMEOUT, ex);
+                query.badRequest(new BadRequestException(
+                  HttpResponseStatus.REQUEST_TIMEOUT, ex.getMessage()));
+                query_exceptions.incrementAndGet();
+              } else if (ex instanceof HBaseException) {
+                query_stats.markSerialized(HttpResponseStatus.FAILED_DEPENDENCY, ex);
+                query.badRequest(new BadRequestException(
+                  HttpResponseStatus.FAILED_DEPENDENCY, ex.getMessage()));
+                query_exceptions.incrementAndGet();
+              } else if (ex instanceof QueryException) {
+                query_stats.markSerialized(((QueryException) ex).getStatus(), ex);
+                query.badRequest(new BadRequestException(
+                  ((QueryException) ex).getStatus(), ex.getMessage()));
+                query_exceptions.incrementAndGet();
+              } else if (ex instanceof BadRequestException) {
+                query_stats.markSerialized(((BadRequestException) ex).getStatus(), ex);
+                query.badRequest((BadRequestException) ex);
+                query_invalid.incrementAndGet();
+              } else if (ex instanceof NoSuchUniqueName) {
+                query_stats.markSerialized(HttpResponseStatus.BAD_REQUEST, ex);
+                query.badRequest(new BadRequestException(ex));
+                query_invalid.incrementAndGet();
+              } else {
+                query_stats.markSerialized(HttpResponseStatus.INTERNAL_SERVER_ERROR, ex);
+                query.badRequest(new BadRequestException(ex));
+                query_exceptions.incrementAndGet();
+              }
 
-        } catch (RuntimeException ex2) {
-          LOG.error("Exception thrown during exception handling", ex2);
-          query_stats.markSerialized(HttpResponseStatus.INTERNAL_SERVER_ERROR, ex2);
-          query.sendReply(HttpResponseStatus.INTERNAL_SERVER_ERROR,
-            ex2.getMessage().getBytes());
-          query_exceptions.incrementAndGet();
+            } catch (RuntimeException ex2) {
+              LOG.error("Exception thrown during exception handling", ex2);
+              query_stats.markSerialized(HttpResponseStatus.INTERNAL_SERVER_ERROR, ex2);
+              query.sendReply(HttpResponseStatus.INTERNAL_SERVER_ERROR,
+                ex2.getMessage().getBytes());
+              query_exceptions.incrementAndGet();
+            }
+            return null;
+          }
+        }
+
+        /** Simply returns the buffer once serialization is complete and logs it */
+        class SendIt implements Callback<Object, ChannelBuffer> {
+          public Object call(final ChannelBuffer buffer) throws Exception {
+            query.sendReply(buffer);
+            query_success.incrementAndGet();
+            return null;
+          }
+        }
+
+        switch (query.apiVersion()) {
+          case 0:
+          case 1:
+            // Mildronize: Merge data from cache and db
+            // Mildronize: Last section before sending data points to users
+            // ErrorCB object return from `processSubQuery`
+            for(ArrayList<DataPoints[]> query_result: query_results) {
+              results.addAll(query_result);
+            }
+            LOG.debug("final result:" + results.toString());
+            query.serializer().formatQueryAsyncV1(data_query, results,
+              globals).addCallback(new SendIt()).addErrback(new ErrorCB());
+            break;
+          default:
+            query_invalid.incrementAndGet();
+            throw new BadRequestException(HttpResponseStatus.NOT_IMPLEMENTED,
+              "Requested API version not implemented", "Version " +
+              query.apiVersion() + " is not implemented");
         }
         return null;
+      }
+    }
+
+    class ErrorCB implements Callback<Object, Exception> {
+      public Object call(final Exception e) throws Exception {
+        e.printStackTrace();
+        return null;
+      }
+    }
+
+    try {
+      Deferred.groupInOrder(deferreds)
+        .addCallback(new SubmitQueryCB())
+        .addErrback(new ErrorCB())
+        .join();
+    } catch (Exception e) {
+      LOG.error("Cache partition exception: ", e);
+    }
+  }
+
+  /**
+   * Processing for a data point sub query
+   * @param tsdb The TSDB to which we belong
+   * @param query The HTTP query to parse/respond
+   * @param allow_expressions Whether or not expressions should be parsed
+   */
+  private Deferred<ArrayList<DataPoints[]>> processSubQuery(final TSDB tsdb, final HttpQuery query,
+                                                     final boolean allow_expressions) throws Exception {
+
+    final TSQuery data_query;
+    final List<ExpressionTree> expressions = new ArrayList<ExpressionTree>();
+    data_query = parseQuery(tsdb, query, expressions);
+
+    // validate and then compile the queries
+    try {
+      LOG.debug(data_query.toString());
+      data_query.validateAndSetQuery();
+    } catch (Exception e) {
+      LOG.error("SubQuery validate exception: ", e);
+    }
+
+    final int nqueries = data_query.getQueries().size();
+    final ArrayList<DataPoints[]> results = new ArrayList<DataPoints[]>(nqueries);
+
+    class ErrorCB implements Callback<Object, Exception> {
+      public Object call(final Exception e) throws Exception {
+        LOG.error("SubQuery exception: ", e);
+        return e;
       }
     }
 
@@ -280,7 +342,7 @@ final class QueryRpc implements HttpRpc {
      * and add dump the results in an array
      */
     class QueriesCB implements Callback<Object, ArrayList<DataPoints[]>> {
-      public Object call(final ArrayList<DataPoints[]> query_results)
+      public ArrayList<DataPoints[]> call(final ArrayList<DataPoints[]> query_results)
         throws Exception {
         if (allow_expressions) {
           // process each of the expressions into a new list, then merge it
@@ -296,30 +358,7 @@ final class QueryRpc implements HttpRpc {
           results.addAll(query_results);
         }
 
-//        /** Simply returns the buffer once serialization is complete and logs it */
-//        class SendIt implements Callback<Object, ChannelBuffer> {
-//          public Object call(final ChannelBuffer buffer) throws Exception {
-//            query.sendReply(buffer);
-//            query_success.incrementAndGet();
-//            return null;
-//          }
-//        }
-//
-//        switch (query.apiVersion()) {
-//          case 0:
-//          case 1:
-//            // Mildronize: Merge data from cache and db
-//            // Mildronize: Last section before sending data points to users
-//            query.serializer().formatQueryAsyncV1(data_query, results,
-//              globals).addCallback(new SendIt()).addErrback(new ErrorCB());
-//            break;
-//          default:
-//            query_invalid.incrementAndGet();
-//            throw new BadRequestException(HttpResponseStatus.NOT_IMPLEMENTED,
-//              "Requested API version not implemented", "Version " +
-//              query.apiVersion() + " is not implemented");
-//        }
-        return null;
+        return results;
       }
     }
 
@@ -340,55 +379,10 @@ final class QueryRpc implements HttpRpc {
       }
     }
 
-    /** Handles storing the global annotations after fetching them */
-    class GlobalCB implements Callback<Object, List<Annotation>> {
-      public Object call(final List<Annotation> annotations) throws Exception {
-        globals.addAll(annotations);
-        return data_query.buildQueriesAsync(tsdb).addCallback(new BuildCB());
-      }
-    }
-
     // Mildronize: Starting to query
 
-    if(allow_send){
-      /** Simply returns the buffer once serialization is complete and logs it */
-      class SendIt implements Callback<Object, ChannelBuffer> {
-        public Object call(final ChannelBuffer buffer) throws Exception {
-          query.sendReply(buffer);
-          query_success.incrementAndGet();
-          return null;
-        }
-      }
-
-      switch (query.apiVersion()) {
-        case 0:
-        case 1:
-          // Mildronize: Merge data from cache and db
-          // Mildronize: Last section before sending data points to users
-          query.serializer().formatQueryAsyncV1(data_query, global_results,
-            globals).addCallback(new SendIt()).addErrback(new ErrorCB());
-          break;
-        default:
-          query_invalid.incrementAndGet();
-          throw new BadRequestException(HttpResponseStatus.NOT_IMPLEMENTED,
-            "Requested API version not implemented", "Version " +
-            query.apiVersion() + " is not implemented");
-      }
-    }else{
-      // if we the caller wants to search for global annotations, fire that off
-      // first then scan for the notes, then pass everything off to the formatter
-      // when complete
-      if (!data_query.getNoAnnotations() && data_query.getGlobalAnnotations()) {
-        Annotation.getGlobalAnnotations(tsdb,
-          data_query.startTime() / 1000, data_query.endTime() / 1000)
-          .addCallback(new GlobalCB()).addErrback(new ErrorCB());
-      } else {
-        data_query.buildQueriesAsync(tsdb).addCallback(new BuildCB())
-          .addErrback(new ErrorCB());
-      }
-
-      global_results.addAll(results);
-    }
+    data_query.buildQueriesAsync(tsdb).addCallback(new BuildCB()).addErrback(new ErrorCB());
+    return Deferred.fromResult(results);
   }
 
   /**
@@ -420,9 +414,9 @@ final class QueryRpc implements HttpRpc {
       expressions = new ArrayList<ExpressionTree>();
       data_query = parseQuery(tsdb, query, expressions);
     }
-    
+
     if (query.getAPIMethod() == HttpMethod.DELETE &&
-        tsdb.getConfig().getBoolean("tsd.http.query.allow_delete")) {
+      tsdb.getConfig().getBoolean("tsd.http.query.allow_delete")) {
       data_query.setDelete(true);
     }
     
@@ -589,6 +583,7 @@ final class QueryRpc implements HttpRpc {
       data_query.buildQueriesAsync(tsdb).addCallback(new BuildCB())
         .addErrback(new ErrorCB());
     }
+
   }
   
   /**
