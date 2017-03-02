@@ -32,14 +32,23 @@ import org.slf4j.LoggerFactory;
 
 final class CacheFragment{
 
-  HttpQuery query;
-  ArrayList<DataPoints[]> dataPoints;
+  private final HttpQuery query;
+  private ArrayList<DataPoints[]> dataPoints;
   private boolean exist;
+  private Exception exception;
 
-  public CacheFragment(final HttpQuery query, final  ArrayList<DataPoints[]> dataPoints, final boolean exist){
+  public CacheFragment(final HttpQuery query){
     this.query = query;
-    this.dataPoints = dataPoints;
+    this.exist = false;
+    this.dataPoints = null;
+    this.exception = null;
+  }
+
+  public CacheFragment(final HttpQuery query, boolean exist){
+    this.query = query;
     this.exist = exist;
+    this.dataPoints = null;
+    this.exception = null;
   }
 
   public boolean isExist(){
@@ -49,5 +58,22 @@ final class CacheFragment{
   public HttpQuery getQuery(){
     return query;
   }
+
+  public Exception getException(){
+    return exception;
+  }
+
+  public void setException(Exception exception){
+    this.exception = exception;
+  }
+
+  public void setDataPoints(ArrayList<DataPoints[]> dataPoints){ this.dataPoints = dataPoints; }
+
+  public void addDataPoints(ArrayList<DataPoints[]> dataPoints){ this.dataPoints.addAll(dataPoints); }
+
+  public ArrayList<DataPoints[]> getDataPoints(){
+    return dataPoints;
+  }
+  //final  ArrayList<DataPoints[]> dataPoints, final boolean exist
 
 }

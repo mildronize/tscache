@@ -126,9 +126,9 @@ final class QueryRpc implements HttpRpc {
       handleExpressionQuery(tsdb, query);
       return;
     } else {
-      // handleQuery(tsdb, query, false);
+      handleQuery(tsdb, query, false);
       // Enable cache
-      handleQueryWithCache(tsdb, query, false);
+      //handleQueryWithCache(tsdb, query, false);
     }
   }
 
@@ -183,7 +183,7 @@ final class QueryRpc implements HttpRpc {
     Cache cache= new Cache(query);
     ArrayList<CacheFragment> fragments = cache.getFragments();
 
-    final ArrayList<Deferred<ArrayList<DataPoints[]>>> deferreds = new ArrayList<Deferred<ArrayList<DataPoints[]>>>();
+    final ArrayList<Deferred<CacheFragment>> deferreds = new ArrayList<Deferred<CacheFragment>>();
     final ArrayList<DataPoints[]> results = new ArrayList<DataPoints[]>();
 
     for(CacheFragment fragment : fragments) {
@@ -191,7 +191,7 @@ final class QueryRpc implements HttpRpc {
 //        deferreds.add(fragment.processCache());
 //      else
       try {
-        deferreds.add(processSubQuery(tsdb, fragment.getQuery(), false));
+        deferreds.add(processSubQueryAsync(tsdb, fragment.getQuery(), false));
       }catch (Exception e){
         LOG.error("processSubQuery Exception" +  e);
       }
@@ -199,8 +199,9 @@ final class QueryRpc implements HttpRpc {
 
     final List<Annotation> globals = new ArrayList<Annotation>();
 
-    class SubmitQueryCB implements Callback<Object, ArrayList<ArrayList<DataPoints[]>> > {
-      public Object call(final ArrayList<ArrayList<DataPoints[]>> query_results) throws Exception {
+    class SubmitQueryCB implements Callback<Object, ArrayList<CacheFragment> > {
+      public Object call(final ArrayList<CacheFragment> CacheFragment_results) throws Exception {
+
         /** This has to be attached to callbacks or we may never respond to clients */
         class ErrorCB implements Callback<Object, Exception> {
           public Object call(final Exception e) throws Exception {
@@ -246,7 +247,8 @@ final class QueryRpc implements HttpRpc {
                 query_exceptions.incrementAndGet();
               }
 
-            } catch (RuntimeException ex2) {
+
+            }catch (RuntimeException ex2) {
               LOG.error("Exception thrown during exception handling", ex2);
               query_stats.markSerialized(HttpResponseStatus.INTERNAL_SERVER_ERROR, ex2);
               query.sendReply(HttpResponseStatus.INTERNAL_SERVER_ERROR,
@@ -272,10 +274,21 @@ final class QueryRpc implements HttpRpc {
             // Mildronize: Merge data from cache and db
             // Mildronize: Last section before sending data points to users
             // ErrorCB object return from `processSubQuery`
-            for(ArrayList<DataPoints[]> query_result: query_results) {
-              results.addAll(query_result);
+
+            // Check only first sub query exception
+            if(CacheFragment_results.size() >= 1){
+              if (CacheFragment_results.get(0).getException() != null){
+                // Force throw exception
+                new ErrorCB().call(CacheFragment_results.get(0).getException());
+                break;
+              }
+            }
+
+            for(CacheFragment CacheFragment_result: CacheFragment_results) {
+              results.addAll(CacheFragment_result.getDataPoints());
             }
             LOG.debug("final result:" + results.toString());
+
             query.serializer().formatQueryAsyncV1(data_query, results,
               globals).addCallback(new SendIt()).addErrback(new ErrorCB());
             break;
@@ -289,9 +302,28 @@ final class QueryRpc implements HttpRpc {
       }
     }
 
+    /** This has to be attached to callbacks or we may never respond to clients */
     class ErrorCB implements Callback<Object, Exception> {
       public Object call(final Exception e) throws Exception {
-        e.printStackTrace();
+        Throwable ex = e;
+        try {
+          LOG.error("Query exception: ", e);
+          if (ex instanceof DeferredGroupException) {
+            ex = e.getCause();
+            while (ex != null && ex instanceof DeferredGroupException) {
+              ex = ex.getCause();
+            }
+            if (ex == null) {
+              LOG.error("The deferred group exception didn't have a cause???");
+            }
+          }
+        }catch (RuntimeException ex2) {
+            LOG.error("Exception thrown during exception handling", ex2);
+            query_stats.markSerialized(HttpResponseStatus.INTERNAL_SERVER_ERROR, ex2);
+            query.sendReply(HttpResponseStatus.INTERNAL_SERVER_ERROR,
+              ex2.getMessage().getBytes());
+            query_exceptions.incrementAndGet();
+        }
         return null;
       }
     }
@@ -312,7 +344,7 @@ final class QueryRpc implements HttpRpc {
    * @param query The HTTP query to parse/respond
    * @param allow_expressions Whether or not expressions should be parsed
    */
-  private Deferred<ArrayList<DataPoints[]>> processSubQuery(final TSDB tsdb, final HttpQuery query,
+  private Deferred<CacheFragment> processSubQueryAsync(final TSDB tsdb, final HttpQuery query,
                                                      final boolean allow_expressions) throws Exception {
 
     final TSQuery data_query;
@@ -330,10 +362,15 @@ final class QueryRpc implements HttpRpc {
     final int nqueries = data_query.getQueries().size();
     final ArrayList<DataPoints[]> results = new ArrayList<DataPoints[]>(nqueries);
 
+    // Perform cache fragment for sending to deferred object
+    final CacheFragment cacheFragment_result = new CacheFragment(query);
+    cacheFragment_result.setDataPoints(new ArrayList<DataPoints[]>());
+
     class ErrorCB implements Callback<Object, Exception> {
       public Object call(final Exception e) throws Exception {
         LOG.error("SubQuery exception: ", e);
-        return e;
+        cacheFragment_result.setException(e);
+        return null;
       }
     }
 
@@ -342,7 +379,7 @@ final class QueryRpc implements HttpRpc {
      * and add dump the results in an array
      */
     class QueriesCB implements Callback<Object, ArrayList<DataPoints[]>> {
-      public ArrayList<DataPoints[]> call(final ArrayList<DataPoints[]> query_results)
+      public Object call(final ArrayList<DataPoints[]> query_results)
         throws Exception {
         if (allow_expressions) {
           // process each of the expressions into a new list, then merge it
@@ -358,7 +395,7 @@ final class QueryRpc implements HttpRpc {
           results.addAll(query_results);
         }
 
-        return results;
+        return null;
       }
     }
 
@@ -382,7 +419,9 @@ final class QueryRpc implements HttpRpc {
     // Mildronize: Starting to query
 
     data_query.buildQueriesAsync(tsdb).addCallback(new BuildCB()).addErrback(new ErrorCB());
-    return Deferred.fromResult(results);
+    cacheFragment_result.addDataPoints(results);
+
+    return Deferred.fromResult(cacheFragment_result);
   }
 
   /**
