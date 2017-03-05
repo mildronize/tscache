@@ -126,9 +126,9 @@ final class QueryRpc implements HttpRpc {
       handleExpressionQuery(tsdb, query);
       return;
     } else {
-      handleQuery(tsdb, query, false);
+      //handleQuery(tsdb, query, false);
       // Enable cache
-      //handleQueryWithCache(tsdb, query, false);
+      handleQueryWithCache(tsdb, query, false);
     }
   }
 
