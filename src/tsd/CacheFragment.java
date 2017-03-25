@@ -22,6 +22,7 @@ import java.util.Map;
 
 import net.opentsdb.core.DataPoints;
 
+import net.opentsdb.meta.Annotation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -30,10 +31,16 @@ import org.slf4j.LoggerFactory;
  * @since 2.0
  */
 
+// TODO: Split into 2 classes, for taking result between functions and for cache fragment purpose
+  /*
+  First class contains `dataPoints`, `exception` and `annotations`, otherwise for second class
+   */
+
 final class CacheFragment{
 
   private final HttpQuery query;
   private ArrayList<DataPoints[]> dataPoints;
+  private List<Annotation> annotations;
   private boolean exist;
   private Exception exception;
 
@@ -41,6 +48,7 @@ final class CacheFragment{
     this.query = query;
     this.exist = false;
     this.dataPoints = null;
+    this.annotations = null;
     this.exception = null;
   }
 
@@ -48,6 +56,7 @@ final class CacheFragment{
     this.query = query;
     this.exist = exist;
     this.dataPoints = null;
+    this.annotations = null;
     this.exception = null;
   }
 
@@ -74,6 +83,13 @@ final class CacheFragment{
   public ArrayList<DataPoints[]> getDataPoints(){
     return dataPoints;
   }
+
+  public List<Annotation> getAnnotations(){
+    return annotations;
+  }
+  public void setAnnotations(List<Annotation> annotations){ this.annotations = annotations; }
+
+  public void addAnnotations(List<Annotation> annotations){ this.annotations.addAll(annotations); }
   //final  ArrayList<DataPoints[]> dataPoints, final boolean exist
 
 }

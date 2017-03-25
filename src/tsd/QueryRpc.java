@@ -286,6 +286,7 @@ final class QueryRpc implements HttpRpc {
 
             for(CacheFragment CacheFragment_result: CacheFragment_results) {
               results.addAll(CacheFragment_result.getDataPoints());
+              globals.addAll(CacheFragment_result.getAnnotations());
             }
             LOG.debug("final result:" + results.toString());
 
@@ -361,10 +362,12 @@ final class QueryRpc implements HttpRpc {
 
     final int nqueries = data_query.getQueries().size();
     final ArrayList<DataPoints[]> results = new ArrayList<DataPoints[]>(nqueries);
+    final List<Annotation> globals = new ArrayList<Annotation>();
 
     // Perform cache fragment for sending to deferred object
     final CacheFragment cacheFragment_result = new CacheFragment(query);
     cacheFragment_result.setDataPoints(new ArrayList<DataPoints[]>());
+    cacheFragment_result.setAnnotations(new ArrayList<Annotation>());
 
     class ErrorCB implements Callback<Object, Exception> {
       public Object call(final Exception e) throws Exception {
@@ -416,10 +419,31 @@ final class QueryRpc implements HttpRpc {
       }
     }
 
-    // Mildronize: Starting to query
+    /** Handles storing the global annotations after fetching them */
+    class GlobalCB implements Callback<Object, List<Annotation>> {
+      public Object call(final List<Annotation> annotations) throws Exception {
+        globals.addAll(annotations);
+        return data_query.buildQueriesAsync(tsdb).addCallback(new BuildCB());
+      }
+    }
 
-    data_query.buildQueriesAsync(tsdb).addCallback(new BuildCB()).addErrback(new ErrorCB());
+    // Mildronize: Starting to query
+    // if we the caller wants to search for global annotations, fire that off
+    // first then scan for the notes, then pass everything off to the formatter
+    // when complete
+    if (!data_query.getNoAnnotations() && data_query.getGlobalAnnotations()) {
+      Annotation.getGlobalAnnotations(tsdb,
+        data_query.startTime() / 1000, data_query.endTime() / 1000)
+        .addCallback(new GlobalCB()).addErrback(new ErrorCB());
+    } else {
+      data_query.buildQueriesAsync(tsdb).addCallback(new BuildCB())
+        .addErrback(new ErrorCB());
+    }
+
+    //data_query.buildQueriesAsync(tsdb).addCallback(new BuildCB()).addErrback(new ErrorCB());
+
     cacheFragment_result.addDataPoints(results);
+    cacheFragment_result.addAnnotations(globals);
 
     return Deferred.fromResult(cacheFragment_result);
   }
