@@ -357,10 +357,6 @@ final class QueryRpc implements HttpRpc {
   }
 
   private Deferred<ArrayList<CacheFragment>> buildSubQueriesAsync(final TSDB tsdb, final Cache cache) {
-
-    LOG.debug("Starting buildSubQueriesAsync");
-
-    final ArrayList<CacheFragment> cacheFragments = new ArrayList<CacheFragment>();
     final List<Deferred<Object>> deferreds = new ArrayList<Deferred<Object>>();
 
     for (final CacheFragment cacheFragment : cache.getFragments()){
@@ -375,8 +371,6 @@ final class QueryRpc implements HttpRpc {
         } catch (Exception e) {
           LOG.error("processSubQueryAsync exception: ", e);
         }
-
-        cacheFragments.add(cacheFragment);
       }
     }
 
@@ -384,7 +378,7 @@ final class QueryRpc implements HttpRpc {
       @Override
       public ArrayList<CacheFragment> call(final ArrayList<Object> deferreds) {
         LOG.debug("Finished buildSubQueriesAsync");
-        return cacheFragments;
+        return cache.getFragments();
       }
       @Override
       public String toString() {
