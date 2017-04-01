@@ -103,15 +103,12 @@ final class CacheFragment{
   /**
    * Processing for a data point sub query
    * @param tsdb The TSDB to which we belong
-   * @param data_query TSQuery which be parsed
    */
-  public Deferred<Object> processSubQueryAsync(final TSDB tsdb, final TSQuery data_query) throws Exception{
+  public Deferred<Object> processSubQueryAsync(final TSDB tsdb) throws Exception{
 
-    final int nqueries = data_query.getQueries().size();
+    final int nqueries = ts_query.getQueries().size();
     dataPoints = new ArrayList<DataPoints[]>(nqueries);
     globals = new ArrayList<Annotation>();
-//    final ArrayList<DataPoints[]> results = new ArrayList<DataPoints[]>(nqueries);
-//    final List<Annotation> globals = new ArrayList<Annotation>();
 
     class ErrorCB implements Callback<Object, Exception> {
       public Object call(final Exception e) throws Exception {
@@ -155,21 +152,20 @@ final class CacheFragment{
     class GlobalCB implements Callback<Object, List<Annotation>> {
       public Object call(final List<Annotation> annotations) throws Exception {
         globals.addAll(annotations);
-        return data_query.buildQueriesAsync(tsdb).addCallback(new BuildCB());
+        return ts_query.buildQueriesAsync(tsdb).addCallback(new BuildCB());
       }
     }
 
     LOG.debug("Starting processSubQueryAsync");
-//    return data_query.buildQueriesAsync(tsdb)
-//      .addCallback(new BuildCB())
-//      .addErrback(new ErrorCB());
-
-    if (!data_query.getNoAnnotations() && data_query.getGlobalAnnotations()) {
+    // if we the caller wants to search for global annotations, fire that off
+    // first then scan for the notes, then pass everything off to the formatter
+    // when complete
+    if (!ts_query.getNoAnnotations() && ts_query.getGlobalAnnotations()) {
       return Annotation.getGlobalAnnotations(tsdb,
-        data_query.startTime() / 1000, data_query.endTime() / 1000)
+        ts_query.startTime() / 1000, ts_query.endTime() / 1000)
         .addCallback(new GlobalCB()).addErrback(new ErrorCB());
     } else {
-      return data_query.buildQueriesAsync(tsdb)
+      return ts_query.buildQueriesAsync(tsdb)
         .addCallback(new BuildCB())
         .addErrback(new ErrorCB());
     }

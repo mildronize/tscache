@@ -39,6 +39,9 @@ final class Cache{
   public Cache(final TSQuery ts_query){
     LOG.debug("Create Cache object");
     fragments = new ArrayList<CacheFragment>();
+
+    // Find missing cache and mark which fragment is exist?
+    
     makeFragments(ts_query);
   }
 
