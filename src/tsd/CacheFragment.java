@@ -151,18 +151,28 @@ final class CacheFragment{
       }
     }
 
-//    /** Handles storing the global annotations after fetching them */
-//    class GlobalCB implements Callback<Object, List<Annotation>> {
-//      public Object call(final List<Annotation> annotations) throws Exception {
-//        globals.addAll(annotations);
-//        return data_query.buildQueriesAsync(tsdb).addCallback(new BuildCB());
-//      }
-//    }
+    /** Handles storing the global annotations after fetching them */
+    class GlobalCB implements Callback<Object, List<Annotation>> {
+      public Object call(final List<Annotation> annotations) throws Exception {
+        globals.addAll(annotations);
+        return data_query.buildQueriesAsync(tsdb).addCallback(new BuildCB());
+      }
+    }
 
     LOG.debug("Starting processSubQueryAsync");
-    return data_query.buildQueriesAsync(tsdb)
-      .addCallback(new BuildCB())
-      .addErrback(new ErrorCB());
+//    return data_query.buildQueriesAsync(tsdb)
+//      .addCallback(new BuildCB())
+//      .addErrback(new ErrorCB());
+
+    if (!data_query.getNoAnnotations() && data_query.getGlobalAnnotations()) {
+      return Annotation.getGlobalAnnotations(tsdb,
+        data_query.startTime() / 1000, data_query.endTime() / 1000)
+        .addCallback(new GlobalCB()).addErrback(new ErrorCB());
+    } else {
+      return data_query.buildQueriesAsync(tsdb)
+        .addCallback(new BuildCB())
+        .addErrback(new ErrorCB());
+    }
   }
 
 }

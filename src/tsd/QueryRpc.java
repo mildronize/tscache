@@ -406,22 +406,6 @@ final class QueryRpc implements HttpRpc {
 
   }
 
-  private TSQuery createSubTSQuery(final TSDB tsdb, final HttpQuery query) {
-    final TSQuery data_query;
-    final List<ExpressionTree> expressions = new ArrayList<ExpressionTree>();
-    data_query = parseQuery(tsdb, query, expressions);
-
-    // validate and then compile the queries
-    try {
-      LOG.debug(data_query.toString());
-      data_query.validateAndSetQuery();
-    } catch (Exception e) {
-      LOG.error("SubQuery validate exception: ", e);
-    }
-
-    return data_query;
-  }
-
   /**
    * Processing for a data point query
    * @param tsdb The TSDB to which we belong
