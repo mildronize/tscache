@@ -126,10 +126,38 @@ final class QueryRpc implements HttpRpc {
       handleExpressionQuery(tsdb, query);
       return;
     } else {
-      //handleQuery(tsdb, query, false);
-      // Enable cache
       handleQueryWithCache(tsdb, query, false);
+      //handleQuery(tsdb, query, false);
     }
+  }
+
+  private void showDatapoints(ArrayList<DataPoints[]> results, boolean count){
+    LOG.debug("Staring showDatapoints ");
+    for (final DataPoints[] dataSets : results) {
+      LOG.debug("Staring showDatapoints 2");
+      for (final DataPoints data : dataSets) {
+        String output = "";
+        output += data.metricName();
+        Map<String, String> resolvedTags = data.getTags();
+        for (final Map.Entry<String, String> pair : resolvedTags.entrySet()) {
+          output += " " + pair.getKey() + "=" + pair.getValue();
+        }
+        LOG.debug("Datapoint: "+ output);
+        //System.out.print("\n");
+
+        final SeekableView it = data.iterator();
+
+        int num_dataPoints = 0;
+        while (it.hasNext()) {
+          final DataPoint dp = it.next();
+          if(!count)LOG.debug( "  " + dp.timestamp() + " "
+            + (dp.isInteger() ? dp.longValue() : dp.doubleValue()));
+          num_dataPoints++;
+        }
+        LOG.debug("Total data points: "+ num_dataPoints);
+      }
+    }
+
   }
 
   /**
@@ -140,7 +168,7 @@ final class QueryRpc implements HttpRpc {
    * (based on the endpoint)
    */
   private void handleQueryWithCache(final TSDB tsdb, final HttpQuery query,
-                                    final boolean allow_expressions){
+                                        final boolean allow_expressions){
 
     // Try to act like `handleQuery`
     // Call... processSubQuery() + SubmitQueryCB() === handleQuery()
@@ -178,26 +206,22 @@ final class QueryRpc implements HttpRpc {
     data_query.setQueryStats(query_stats);
     query.setStats(query_stats);
 
-    //-- --
-
+    // Starting cache
     Cache cache= new Cache(query);
     ArrayList<CacheFragment> fragments = cache.getFragments();
 
-    final ArrayList<Deferred<CacheFragment>> deferreds = new ArrayList<Deferred<CacheFragment>>();
-    final ArrayList<DataPoints[]> results = new ArrayList<DataPoints[]>();
+    final ArrayList<HttpQuery> queries = new ArrayList<HttpQuery>();
+    final int nqueries = data_query.getQueries().size();
+    final ArrayList<DataPoints[]> results = new ArrayList<DataPoints[]>(nqueries);
+    final List<Annotation> globals = new ArrayList<Annotation>();
 
     for(CacheFragment fragment : fragments) {
 //      if(fragment.isExist())
 //        deferreds.add(fragment.processCache());
 //      else
-      try {
-        deferreds.add(processSubQueryAsync(tsdb, fragment.getQuery(), false));
-      }catch (Exception e){
-        LOG.error("processSubQuery Exception" +  e);
-      }
+      queries.add(fragment.getQuery());
     }
 
-    final List<Annotation> globals = new ArrayList<Annotation>();
 
     class SubmitQueryCB implements Callback<Object, ArrayList<CacheFragment> > {
       public Object call(final ArrayList<CacheFragment> CacheFragment_results) throws Exception {
@@ -288,7 +312,12 @@ final class QueryRpc implements HttpRpc {
               results.addAll(CacheFragment_result.getDataPoints());
               globals.addAll(CacheFragment_result.getAnnotations());
             }
-            LOG.debug("final result:" + results.toString());
+            LOG.debug("Finish cache, Result size: " + results.size());
+            if (results.size() > 0 ){
+              if (results.get(0).length > 0)
+                LOG.debug("Finish cache, data point size: " + results.get(0)[0].size());
+            }
+            //showDatapoints(results, true);
 
             query.serializer().formatQueryAsyncV1(data_query, results,
               globals).addCallback(new SendIt()).addErrback(new ErrorCB());
@@ -319,35 +348,63 @@ final class QueryRpc implements HttpRpc {
             }
           }
         }catch (RuntimeException ex2) {
-            LOG.error("Exception thrown during exception handling", ex2);
-            query_stats.markSerialized(HttpResponseStatus.INTERNAL_SERVER_ERROR, ex2);
-            query.sendReply(HttpResponseStatus.INTERNAL_SERVER_ERROR,
-              ex2.getMessage().getBytes());
-            query_exceptions.incrementAndGet();
+          LOG.error("Exception thrown during exception handling", ex2);
+          query_stats.markSerialized(HttpResponseStatus.INTERNAL_SERVER_ERROR, ex2);
+          query.sendReply(HttpResponseStatus.INTERNAL_SERVER_ERROR,
+            ex2.getMessage().getBytes());
+          query_exceptions.incrementAndGet();
         }
         return null;
       }
     }
 
     try {
-      Deferred.groupInOrder(deferreds)
+      buildSubQueriesAsync(tsdb, queries)
         .addCallback(new SubmitQueryCB())
         .addErrback(new ErrorCB())
         .join();
     } catch (Exception e) {
       LOG.error("Cache partition exception: ", e);
     }
+
   }
 
-  /**
-   * Processing for a data point sub query
-   * @param tsdb The TSDB to which we belong
-   * @param query The HTTP query to parse/respond
-   * @param allow_expressions Whether or not expressions should be parsed
-   */
-  private Deferred<CacheFragment> processSubQueryAsync(final TSDB tsdb, final HttpQuery query,
-                                                     final boolean allow_expressions) throws Exception {
+  private Deferred<ArrayList<CacheFragment>> buildSubQueriesAsync(final TSDB tsdb, final ArrayList<HttpQuery> queries) {
 
+    LOG.debug("Starting buildSubQueriesAsync");
+
+    final ArrayList<CacheFragment> cacheFragments = new ArrayList<CacheFragment>();
+    final List<Deferred<Object>> deferreds = new ArrayList<Deferred<Object>>();
+
+    for (final HttpQuery query : queries){
+      CacheFragment cacheFragment = new CacheFragment(query, false);
+      try {
+        deferreds.add(
+          cacheFragment.processSubQueryAsync(tsdb, createSubTSQuery(tsdb, query))
+        );
+      } catch (Exception e) {
+        LOG.error("processSubQueryAsync exception: ", e);
+      }
+      cacheFragments.add(cacheFragment);
+    }
+
+    class GroupFinished implements Callback<ArrayList<CacheFragment>, ArrayList<Object>> {
+      @Override
+      public ArrayList<CacheFragment> call(final ArrayList<Object> deferreds) {
+        LOG.debug("Finished buildSubQueriesAsync");
+        return cacheFragments;
+      }
+      @Override
+      public String toString() {
+        return "TSQuery compile group callback";
+      }
+    }
+
+    return Deferred.groupInOrder(deferreds).addCallback(new GroupFinished());
+
+  }
+
+  private TSQuery createSubTSQuery(final TSDB tsdb, final HttpQuery query) {
     final TSQuery data_query;
     final List<ExpressionTree> expressions = new ArrayList<ExpressionTree>();
     data_query = parseQuery(tsdb, query, expressions);
@@ -360,92 +417,7 @@ final class QueryRpc implements HttpRpc {
       LOG.error("SubQuery validate exception: ", e);
     }
 
-    final int nqueries = data_query.getQueries().size();
-    final ArrayList<DataPoints[]> results = new ArrayList<DataPoints[]>(nqueries);
-    final List<Annotation> globals = new ArrayList<Annotation>();
-
-    // Perform cache fragment for sending to deferred object
-    final CacheFragment cacheFragment_result = new CacheFragment(query);
-    cacheFragment_result.setDataPoints(new ArrayList<DataPoints[]>());
-    cacheFragment_result.setAnnotations(new ArrayList<Annotation>());
-
-    class ErrorCB implements Callback<Object, Exception> {
-      public Object call(final Exception e) throws Exception {
-        LOG.error("SubQuery exception: ", e);
-        cacheFragment_result.setException(e);
-        return null;
-      }
-    }
-
-    /**
-     * After all of the queries have run, we get the results in the order given
-     * and add dump the results in an array
-     */
-    class QueriesCB implements Callback<Object, ArrayList<DataPoints[]>> {
-      public Object call(final ArrayList<DataPoints[]> query_results)
-        throws Exception {
-        if (allow_expressions) {
-          // process each of the expressions into a new list, then merge it
-          // with the original. This avoids possible recursion loops.
-          final List<DataPoints[]> expression_results =
-            new ArrayList<DataPoints[]>(expressions.size());
-          // let exceptions bubble up
-          for (final ExpressionTree expression : expressions) {
-            expression_results.add(expression.evaluate(query_results));
-          }
-          results.addAll(expression_results);
-        } else {
-          results.addAll(query_results);
-        }
-
-        return null;
-      }
-    }
-
-    /**
-     * Callback executed after we have resolved the metric, tag names and tag
-     * values to their respective UIDs. This callback then runs the actual
-     * queries and fetches their results.
-     */
-    class BuildCB implements Callback<Deferred<Object>, Query[]> {
-      @Override
-      public Deferred<Object> call(final Query[] queries) {
-        final ArrayList<Deferred<DataPoints[]>> deferreds =
-          new ArrayList<Deferred<DataPoints[]>>(queries.length);
-        for (final Query query : queries) {
-          deferreds.add(query.runAsync());
-        }
-        return Deferred.groupInOrder(deferreds).addCallback(new QueriesCB());
-      }
-    }
-
-    /** Handles storing the global annotations after fetching them */
-    class GlobalCB implements Callback<Object, List<Annotation>> {
-      public Object call(final List<Annotation> annotations) throws Exception {
-        globals.addAll(annotations);
-        return data_query.buildQueriesAsync(tsdb).addCallback(new BuildCB());
-      }
-    }
-
-    // Mildronize: Starting to query
-    // if we the caller wants to search for global annotations, fire that off
-    // first then scan for the notes, then pass everything off to the formatter
-    // when complete
-    if (!data_query.getNoAnnotations() && data_query.getGlobalAnnotations()) {
-      Annotation.getGlobalAnnotations(tsdb,
-        data_query.startTime() / 1000, data_query.endTime() / 1000)
-        .addCallback(new GlobalCB()).addErrback(new ErrorCB());
-    } else {
-      data_query.buildQueriesAsync(tsdb).addCallback(new BuildCB())
-        .addErrback(new ErrorCB());
-    }
-
-    //data_query.buildQueriesAsync(tsdb).addCallback(new BuildCB()).addErrback(new ErrorCB());
-
-    cacheFragment_result.addDataPoints(results);
-    cacheFragment_result.addAnnotations(globals);
-
-    return Deferred.fromResult(cacheFragment_result);
+    return data_query;
   }
 
   /**

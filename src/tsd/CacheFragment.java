@@ -20,9 +20,15 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.stumbleupon.async.Callback;
+import com.stumbleupon.async.Deferred;
 import net.opentsdb.core.DataPoints;
 
+import net.opentsdb.core.Query;
+import net.opentsdb.core.TSDB;
+import net.opentsdb.core.TSQuery;
 import net.opentsdb.meta.Annotation;
+import net.opentsdb.query.expression.ExpressionTree;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -37,6 +43,8 @@ import org.slf4j.LoggerFactory;
    */
 
 final class CacheFragment{
+
+  private static final Logger LOG = LoggerFactory.getLogger(CacheFragment.class);
 
   private final HttpQuery query;
   private ArrayList<DataPoints[]> dataPoints;
@@ -78,7 +86,7 @@ final class CacheFragment{
 
   public void setDataPoints(ArrayList<DataPoints[]> dataPoints){ this.dataPoints = dataPoints; }
 
-  public void addDataPoints(ArrayList<DataPoints[]> dataPoints){ this.dataPoints.addAll(dataPoints); }
+  public void addDataPoints(List<DataPoints[]> dataPoints){ this.dataPoints.addAll(dataPoints); }
 
   public ArrayList<DataPoints[]> getDataPoints(){
     return dataPoints;
@@ -91,5 +99,73 @@ final class CacheFragment{
 
   public void addAnnotations(List<Annotation> annotations){ this.annotations.addAll(annotations); }
   //final  ArrayList<DataPoints[]> dataPoints, final boolean exist
+
+  /**
+   * Processing for a data point sub query
+   * @param tsdb The TSDB to which we belong
+   * @param data_query TSQuery which be parsed
+   */
+  public Deferred<Object> processSubQueryAsync(final TSDB tsdb, final TSQuery data_query) throws Exception{
+
+    final int nqueries = data_query.getQueries().size();
+    final ArrayList<DataPoints[]> results = new ArrayList<DataPoints[]>(nqueries);
+    final List<Annotation> globals = new ArrayList<Annotation>();
+
+    // Perform cache fragment for sending to deferred object
+    final CacheFragment cacheFragment_result = new CacheFragment(query);
+    this.setDataPoints(new ArrayList<DataPoints[]>());
+    this.setAnnotations(new ArrayList<Annotation>());
+
+    class ErrorCB implements Callback<Object, Exception> {
+      public Object call(final Exception e) throws Exception {
+        LOG.error("SubQuery exception: ", e);
+        exception = e;
+        return null;
+      }
+    }
+
+    /**
+     * After all of the queries have run, we get the results in the order given
+     * and add dump the results in an array
+     */
+    class QueriesCB implements Callback<Object, ArrayList<DataPoints[]>> {
+      public Object call(final ArrayList<DataPoints[]> query_results)
+        throws Exception {
+          dataPoints.addAll(query_results);
+          LOG.debug("Got datapoints");
+          return null;
+      }
+    }
+
+    /**
+     * Callback executed after we have resolved the metric, tag names and tag
+     * values to their respective UIDs. This callback then runs the actual
+     * queries and fetches their results.
+     */
+    class BuildCB implements Callback<Object, Query[]> {
+      @Override
+      public Object call(final Query[] queries) {
+        final ArrayList<Deferred<DataPoints[]>> deferreds =
+          new ArrayList<Deferred<DataPoints[]>>(queries.length);
+        for (final Query query : queries) {
+          deferreds.add(query.runAsync());
+        }
+        return Deferred.groupInOrder(deferreds).addCallback(new QueriesCB());
+      }
+    }
+
+    /** Handles storing the global annotations after fetching them */
+    class GlobalCB implements Callback<Object, List<Annotation>> {
+      public Object call(final List<Annotation> annotations) throws Exception {
+        //globals.addAll(annotations);
+        cacheFragment_result.addAnnotations(globals);
+        return data_query.buildQueriesAsync(tsdb).addCallback(new BuildCB());
+      }
+    }
+    LOG.debug("Starting processSubQueryAsync");
+    return data_query.buildQueriesAsync(tsdb)
+      .addCallback(new BuildCB())
+      .addErrback(new ErrorCB());
+  }
 
 }

@@ -553,13 +553,9 @@ public final class TestQueryRpc {
     final HttpQuery query = NettyMocks.getQuery(tsdb, 
         "/api/query?start=1h-ago&m=sum:sys.cpu.user");
     rpc.execute(tsdb, query);
-    System.out.println("Query response: " + query.response().getStatus());
-    System.out.println("Expected      : " + HttpResponseStatus.BAD_REQUEST);
     assertEquals(HttpResponseStatus.BAD_REQUEST, query.response().getStatus());
     final String json = 
         query.response().getContent().toString(Charset.forName("UTF-8"));
-    System.out.println("JSON : " + json);
-    System.out.println("Result assert:" + json.contains("No such name for 'foo': 'metrics'"));
     assertTrue(json.contains("No such name for 'foo': 'metrics'"));
 
   }
