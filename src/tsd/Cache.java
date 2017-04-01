@@ -22,6 +22,7 @@ import java.util.Map;
 
 import net.opentsdb.core.DataPoints;
 
+import net.opentsdb.core.TSQuery;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -35,14 +36,14 @@ final class Cache{
 
   private ArrayList<CacheFragment> fragments;
 
-  public Cache(final HttpQuery query){
+  public Cache(final TSQuery ts_query){
     LOG.debug("Create Cache object");
     fragments = new ArrayList<CacheFragment>();
-    makeFragments(query);
+    makeFragments(ts_query);
   }
 
-  private void makeFragments(final HttpQuery query){
-    fragments.add(new CacheFragment(query, false));
+  private void makeFragments(final TSQuery ts_query){
+    fragments.add(new CacheFragment(ts_query, false));
   }
 
   ArrayList<CacheFragment> getFragments(){

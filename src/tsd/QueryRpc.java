@@ -207,10 +207,10 @@ final class QueryRpc implements HttpRpc {
     query.setStats(query_stats);
 
     // Starting cache
-    Cache cache= new Cache(query);
+    Cache cache= new Cache(data_query);
     ArrayList<CacheFragment> fragments = cache.getFragments();
 
-    final ArrayList<HttpQuery> queries = new ArrayList<HttpQuery>();
+    final ArrayList<TSQuery> ts_queries = new ArrayList<TSQuery>();
     final int nqueries = data_query.getQueries().size();
     final ArrayList<DataPoints[]> results = new ArrayList<DataPoints[]>(nqueries);
     final List<Annotation> globals = new ArrayList<Annotation>();
@@ -219,7 +219,7 @@ final class QueryRpc implements HttpRpc {
 //      if(fragment.isExist())
 //        deferreds.add(fragment.processCache());
 //      else
-      queries.add(fragment.getQuery());
+      ts_queries.add(fragment.getQuery());
     }
 
 
@@ -359,7 +359,7 @@ final class QueryRpc implements HttpRpc {
     }
 
     try {
-      buildSubQueriesAsync(tsdb, queries)
+      buildSubQueriesAsync(tsdb, ts_queries)
         .addCallback(new SubmitQueryCB())
         .addErrback(new ErrorCB())
         .join();
@@ -369,18 +369,20 @@ final class QueryRpc implements HttpRpc {
 
   }
 
-  private Deferred<ArrayList<CacheFragment>> buildSubQueriesAsync(final TSDB tsdb, final ArrayList<HttpQuery> queries) {
+  private Deferred<ArrayList<CacheFragment>> buildSubQueriesAsync(final TSDB tsdb, final ArrayList<TSQuery> ts_queries) {
 
     LOG.debug("Starting buildSubQueriesAsync");
 
     final ArrayList<CacheFragment> cacheFragments = new ArrayList<CacheFragment>();
     final List<Deferred<Object>> deferreds = new ArrayList<Deferred<Object>>();
 
-    for (final HttpQuery query : queries){
-      CacheFragment cacheFragment = new CacheFragment(query, false);
+    for (final TSQuery ts_query : ts_queries){
+      CacheFragment cacheFragment = new CacheFragment(ts_query, false);
       try {
+        LOG.debug("Fragment Query: " + ts_query.toString());
+        ts_query.validateAndSetQuery();
         deferreds.add(
-          cacheFragment.processSubQueryAsync(tsdb, createSubTSQuery(tsdb, query))
+          cacheFragment.processSubQueryAsync(tsdb, ts_query)
         );
       } catch (Exception e) {
         LOG.error("processSubQueryAsync exception: ", e);

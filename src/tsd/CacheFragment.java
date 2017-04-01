@@ -46,25 +46,25 @@ final class CacheFragment{
 
   private static final Logger LOG = LoggerFactory.getLogger(CacheFragment.class);
 
-  private final HttpQuery query;
+  private final TSQuery ts_query;
   private ArrayList<DataPoints[]> dataPoints;
-  private List<Annotation> annotations;
+  private List<Annotation> globals;
   private boolean exist;
   private Exception exception;
 
-  public CacheFragment(final HttpQuery query){
-    this.query = query;
+  public CacheFragment(final TSQuery ts_query){
+    this.ts_query = ts_query;
     this.exist = false;
     this.dataPoints = null;
-    this.annotations = null;
+    this.globals = null;
     this.exception = null;
   }
 
-  public CacheFragment(final HttpQuery query, boolean exist){
-    this.query = query;
+  public CacheFragment(final TSQuery ts_query, boolean exist){
+    this.ts_query = ts_query;
     this.exist = exist;
     this.dataPoints = null;
-    this.annotations = null;
+    this.globals = null;
     this.exception = null;
   }
 
@@ -72,8 +72,8 @@ final class CacheFragment{
     return exist;
   }
 
-  public HttpQuery getQuery(){
-    return query;
+  public TSQuery getQuery(){
+    return ts_query;
   }
 
   public Exception getException(){
@@ -84,20 +84,20 @@ final class CacheFragment{
     this.exception = exception;
   }
 
-  public void setDataPoints(ArrayList<DataPoints[]> dataPoints){ this.dataPoints = dataPoints; }
+  //public void setDataPoints(ArrayList<DataPoints[]> dataPoints){ this.dataPoints = dataPoints; }
 
-  public void addDataPoints(List<DataPoints[]> dataPoints){ this.dataPoints.addAll(dataPoints); }
+  //public void addDataPoints(List<DataPoints[]> dataPoints){ this.dataPoints.addAll(dataPoints); }
 
   public ArrayList<DataPoints[]> getDataPoints(){
     return dataPoints;
   }
 
   public List<Annotation> getAnnotations(){
-    return annotations;
+    return globals;
   }
-  public void setAnnotations(List<Annotation> annotations){ this.annotations = annotations; }
+  //public void setAnnotations(List<Annotation> annotations){ this.globals = annotations; }
 
-  public void addAnnotations(List<Annotation> annotations){ this.annotations.addAll(annotations); }
+  //public void addAnnotations(List<Annotation> annotations){ this.globals.addAll(annotations); }
   //final  ArrayList<DataPoints[]> dataPoints, final boolean exist
 
   /**
@@ -108,13 +108,10 @@ final class CacheFragment{
   public Deferred<Object> processSubQueryAsync(final TSDB tsdb, final TSQuery data_query) throws Exception{
 
     final int nqueries = data_query.getQueries().size();
-    final ArrayList<DataPoints[]> results = new ArrayList<DataPoints[]>(nqueries);
-    final List<Annotation> globals = new ArrayList<Annotation>();
-
-    // Perform cache fragment for sending to deferred object
-    final CacheFragment cacheFragment_result = new CacheFragment(query);
-    this.setDataPoints(new ArrayList<DataPoints[]>());
-    this.setAnnotations(new ArrayList<Annotation>());
+    dataPoints = new ArrayList<DataPoints[]>(nqueries);
+    globals = new ArrayList<Annotation>();
+//    final ArrayList<DataPoints[]> results = new ArrayList<DataPoints[]>(nqueries);
+//    final List<Annotation> globals = new ArrayList<Annotation>();
 
     class ErrorCB implements Callback<Object, Exception> {
       public Object call(final Exception e) throws Exception {
@@ -154,14 +151,14 @@ final class CacheFragment{
       }
     }
 
-    /** Handles storing the global annotations after fetching them */
-    class GlobalCB implements Callback<Object, List<Annotation>> {
-      public Object call(final List<Annotation> annotations) throws Exception {
-        //globals.addAll(annotations);
-        cacheFragment_result.addAnnotations(globals);
-        return data_query.buildQueriesAsync(tsdb).addCallback(new BuildCB());
-      }
-    }
+//    /** Handles storing the global annotations after fetching them */
+//    class GlobalCB implements Callback<Object, List<Annotation>> {
+//      public Object call(final List<Annotation> annotations) throws Exception {
+//        globals.addAll(annotations);
+//        return data_query.buildQueriesAsync(tsdb).addCallback(new BuildCB());
+//      }
+//    }
+
     LOG.debug("Starting processSubQueryAsync");
     return data_query.buildQueriesAsync(tsdb)
       .addCallback(new BuildCB())
