@@ -148,6 +148,7 @@ tsdb_SRC := \
 	src/tsd/BadRequestException.java	\
 	src/tsd/Cache.java	\
 	src/tsd/CacheFragment.java	\
+	src/tsd/CacheRPCClient.java	\
 	src/tsd/ConnectionManager.java	\
 	src/tsd/DropCachesRpc.java \
 	src/tsd/GnuplotException.java	\
@@ -212,7 +213,8 @@ tsdb_DEPS = \
 	$(NETTY)	\
 	$(SLF4J_API)	\
 	$(SUASYNC)	\
-	$(APACHE_MATH)
+	$(APACHE_MATH) \
+	$(AMQP_CLIENT)
 
 if BIGTABLE
 tsdb_DEPS += \
@@ -803,6 +805,7 @@ pom.xml: pom.xml.in Makefile
 	    -e 's/@APACHE_MATH_VERSION@/$(APACHE_MATH_VERSION)/' \
 	    -e 's/@JEXL_VERSION@/$(JEXL_VERSION)/' \
 	    -e 's/@JGRAPHT_VERSION@/$(JGRAPHT_VERSION)/' \
+	    -e 's/@AMQP_CLIENT_VERSION@/$(AMQP_CLIENT_VERSION)/' \
 	    -e 's/@spec_title@/$(spec_title)/' \
 	    -e 's/@spec_vendor@/$(spec_vendor)/' \
 	    -e 's/@spec_version@/$(PACKAGE_VERSION)/' \

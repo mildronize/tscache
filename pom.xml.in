@@ -486,6 +486,14 @@
       <version>@GWT_THEME_VERSION@</version>
     </dependency>
 
+    <!-- tsdb cache dependencies -->
+
+    <dependency>
+        <groupId>com.rabbitmq</groupId>
+        <artifactId>amqp-client</artifactId>
+        <version>@AMQP_CLIENT_VERSION@</version>
+    </dependency>
+
   </dependencies>
 
   <properties>
