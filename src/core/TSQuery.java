@@ -108,6 +108,28 @@ public final class TSQuery {
   public TSQuery() {
     
   }
+
+  /** Clone a new TSQuery*/
+  public void clone(TSQuery query){
+    start = query.start;
+    end = query.end;
+    timezone = query.timezone;
+    options = query.options;
+    padding = query.padding;
+    no_annotations = query.no_annotations;
+    with_global_annotations = query.with_global_annotations;
+    show_tsuids = query.show_tsuids;
+    queries = query.queries;
+    start_time = query.start_time;
+    end_time = query.end_time;
+    ms_resolution = query.ms_resolution;
+    show_query = query.show_query;
+    show_stats = query.show_stats;
+    show_summary = query.show_summary;
+    delete = query.delete;
+    use_calendar = query.use_calendar;
+    query_stats = query.query_stats;
+  }
   
   @Override
   public int hashCode() {
@@ -412,6 +434,16 @@ public final class TSQuery {
    */
   public void setEnd(String end) {
     this.end = end;
+  }
+
+  /** @param start_time The parsed start time value */
+  public void setStartTime(long start_time) {
+    this.start_time = start_time;
+  }
+
+  /** @param end_time The parsed start time value */
+  public void setEndTime(long end_time) {
+    this.end_time = end_time;
   }
 
   /** @param timezone an optional timezone for date parsing */

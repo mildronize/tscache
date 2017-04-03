@@ -1,4 +1,4 @@
-package net.opentsdb.tsd;
+package net.opentsdb.tsd.cache;
 
 import com.rabbitmq.client.*;
 
@@ -14,13 +14,13 @@ import java.util.concurrent.TimeoutException;
 
 // This class is just a simple RPCClient with blocking I/O.
 
-public class CacheRPCClient {
+public class RPCClient {
   private Connection connection;
   private Channel channel;
   private String requestQueueName;
   private String replyQueueName;
 
-  public CacheRPCClient(final String host, final String requestQueueName) throws IOException, TimeoutException {
+  public RPCClient(final String host, final String requestQueueName) throws IOException, TimeoutException {
     this.requestQueueName = requestQueueName;
     ConnectionFactory factory = new ConnectionFactory();
     factory.setHost(host);

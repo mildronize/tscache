@@ -16,9 +16,7 @@
 package net.opentsdb.tsd;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 import com.stumbleupon.async.Callback;
 import com.stumbleupon.async.Deferred;
@@ -28,7 +26,6 @@ import net.opentsdb.core.Query;
 import net.opentsdb.core.TSDB;
 import net.opentsdb.core.TSQuery;
 import net.opentsdb.meta.Annotation;
-import net.opentsdb.query.expression.ExpressionTree;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

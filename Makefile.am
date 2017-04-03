@@ -143,12 +143,13 @@ tsdb_SRC := \
 	src/tree/Tree.java	\
 	src/tree/TreeBuilder.java	\
 	src/tree/TreeRule.java	\
+	src/tsd/cache/QueryFragment.java	\
+  src/tsd/cache/RPCClient.java	\
 	src/tsd/AbstractHttpQuery.java	\
 	src/tsd/AnnotationRpc.java	\
 	src/tsd/BadRequestException.java	\
 	src/tsd/Cache.java	\
 	src/tsd/CacheFragment.java	\
-	src/tsd/CacheRPCClient.java	\
 	src/tsd/ConnectionManager.java	\
 	src/tsd/DropCachesRpc.java \
 	src/tsd/GnuplotException.java	\
