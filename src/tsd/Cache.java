@@ -25,6 +25,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import net.opentsdb.core.DataPoints;
 
 import net.opentsdb.core.TSQuery;
+import net.opentsdb.query.filter.TagVFilter;
 import net.opentsdb.tsd.cache.QueryFragment;
 import net.opentsdb.tsd.cache.RPCClient;
 import org.jboss.netty.handler.codec.http.HttpResponseStatus;
@@ -49,10 +50,10 @@ final class Cache{
     fragments = new ArrayList<CacheFragment>();
 
     // Find missing cache and mark which fragment is exist?
-    makeFragments(ts_query);
+    makeFragments();
   }
 
-  private String callRPC(final String input, final String rpcName){
+  static String callRPC(final String cacheServerHost, final String input, final String rpcName){
     RPCClient rpcClient = null;
     String response = null;
     try {
@@ -71,9 +72,45 @@ final class Cache{
     return response;
   }
 
-  private void makeFragments(final TSQuery ts_query){
-    // metric + start + end time
-    String response = callRPC("", "tsdb-cache-query-fragments");
+  static String buildSubQueryRPC(final TSQuery ts_query){
+    /*
+    Metric will be stored in TSSubQuery (A TSQuery must be at least 1 TSSubQuery) )
+
+    Limitation:
+    - This case uses only one TSSubQuery.
+    - Need to know both of metric and all tags to identify which time series (literal_or)
+     */
+    StringBuilder tmp = new StringBuilder();
+    // metric
+    tmp.append(ts_query.getQueries().get(0).getMetric());
+    tmp.append('-');
+    // tags
+    for(TagVFilter filter : ts_query.getQueries().get(0).getFilters() ) {
+      if (filter.getType().equals("literal_or")) {
+        tmp.append(filter.getTagk());
+        tmp.append('=');
+        tmp.append(filter.getFilter());
+      }else {
+        throw new BadRequestException(HttpResponseStatus.BAD_REQUEST,
+          "Bad request",
+          "Cache Error: Need to exactly know both of metric and all tags to identify");
+      }
+      tmp.append(",");
+    }
+
+    tmp.append(":");
+    //start_time
+    tmp.append(ts_query.startTime());
+    tmp.append("-");
+    tmp.append(ts_query.endTime());
+    return tmp.toString();
+  }
+
+  private void makeFragments(){
+    /*
+    [metric]-[key1=value1,key2=value2,...]:[start_time]-[end_time]
+     */
+    String response = callRPC(cacheServerHost, buildSubQueryRPC(ts_query), "tsdb-cache-query-fragments");
     try {
       QueryFragment[] queryFragments = new ObjectMapper().readValue( response, QueryFragment[].class);
       for (QueryFragment queryFragment : queryFragments) {

@@ -48,6 +48,7 @@ final class CacheFragment{
   private List<Annotation> globals;
   private boolean exist;
   private Exception exception;
+  private String cacheServerHost = "docker";
 
   public CacheFragment(final TSQuery ts_query){
     this.ts_query = ts_query;
@@ -166,6 +167,17 @@ final class CacheFragment{
         .addCallback(new BuildCB())
         .addErrback(new ErrorCB());
     }
+  }
+
+  public Deferred<Object> retrieveCacheSubQueryAsync(final TSDB tsdb) throws Exception{
+    // blocking I/O
+    String response = Cache.callRPC(cacheServerHost, Cache.buildSubQueryRPC(ts_query) , "tsdb-cache-retrieve-sub-query");
+    // JSON of list of data points
+
+    // parse into java object
+
+    // store in dataPoints
+    return Deferred.fromResult(new Object());
   }
 
 }
