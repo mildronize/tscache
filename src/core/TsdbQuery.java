@@ -24,6 +24,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 
+import net.opentsdb.tree.Tree;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.hbase.async.Bytes;
@@ -509,10 +510,62 @@ final class TsdbQuery implements Query {
       throw new RuntimeException("Should never be here", e);
     }
   }
-  
+
+
+  public Deferred<TreeMap<byte[], Span>> runRawAsync() throws HBaseException {
+    return findSpans();
+  }
+
+  private Deferred<TreeMap<byte[], Span>> buildFragmentAsync(ArrayList<CacheFragment> cacheFragments){
+    final ArrayList<Deferred<TreeMap<byte[], Span>>> deferreds = new ArrayList<Deferred<TreeMap<byte[], Span>>>();
+
+    for (final CacheFragment cacheFragment: cacheFragments){
+      if (cacheFragment.isInCache())  // true in cache
+        deferreds.add(tsdb.cache.findCache(cacheFragment));
+      else{
+        //copy object TsdbQuery
+        TsdbQuery newTsdbQuery = new TsdbQuery();
+        newTsdbQuery.setStartTime(cacheFragment.getStartTime());
+        newTsdbQuery.setEndTime(cacheFragment.getEndTime());
+        deferreds.add(newTsdbQuery.runRawAsync());
+      }
+    }
+    class GroupFinished implements Callback<TreeMap<byte[], Span>, ArrayList<TreeMap<byte[], Span>>> {
+      @Override
+      public TreeMap<byte[], Span> call(final ArrayList<TreeMap<byte[], Span>> spans) {
+        // merge each TreeMap together
+        final short metric_width = tsdb.metrics.width();
+        final TreeMap<byte[], Span> result_spans = // The key is a row key from HBase.
+          new TreeMap<byte[], Span>(new SpanCmp(
+            (short)(Const.SALT_WIDTH() + metric_width)));
+
+        for(final TreeMap<byte[], Span> span : spans) {
+          for(Map.Entry<byte[], Span> entry : span.entrySet()) {
+            Span datapoints = result_spans.get(entry.getKey());
+            if (datapoints == null) {
+              datapoints = new Span(tsdb);
+              result_spans.put(entry.getKey(), datapoints);
+            }
+          }
+        }
+
+        return result_spans;
+      }
+      @Override
+      public String toString() {
+        return "Merge TreeMap (HBase row) callback";
+      }
+    }
+
+    return Deferred.groupInOrder(deferreds).addCallback(new GroupFinished());
+  }
+
   @Override
   public Deferred<DataPoints[]> runAsync() throws HBaseException {
-    return findSpans().addCallback(new GroupByAndAggregateCB());
+    return buildFragmentAsync(tsdb.cache.buildCacheFragments(this))
+      .addCallback(new GroupByAndAggregateCB());
+    // Without Cache
+    // return findSpans().addCallback(new GroupByAndAggregateCB());
   }
 
   /**
@@ -885,7 +938,7 @@ final class TsdbQuery implements Query {
   */
   private class GroupByAndAggregateCB implements 
     Callback<DataPoints[], TreeMap<byte[], Span>>{
-    
+
     /**
     * Creates the {@link SpanGroup}s to form the final results of this query.
     * @param spans The {@link Span}s found for this query ({@link #findSpans}).
@@ -895,6 +948,12 @@ final class TsdbQuery implements Query {
     */
     @Override
     public DataPoints[] call(final TreeMap<byte[], Span> spans) throws Exception {
+
+      // Mildronize: Debug
+      for (Map.Entry<byte[], Span> entry : spans.entrySet()) {
+        LOG.debug("Key: " + entry.getKey() + ". Value: " + entry.getValue());
+     }
+
       if (query_stats != null) {
         query_stats.addStat(query_index, QueryStat.QUERY_SCAN_TIME, 
                 (System.nanoTime() - TsdbQuery.this.scan_start_time));
