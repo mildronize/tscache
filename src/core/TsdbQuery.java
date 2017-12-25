@@ -52,7 +52,7 @@ import net.opentsdb.utils.DateTime;
 /**
  * Non-synchronized implementation of {@link Query}.
  */
-final class TsdbQuery implements Query {
+  final class TsdbQuery implements Query, Cloneable {
 
   private static final Logger LOG = LoggerFactory.getLogger(TsdbQuery.class);
 
@@ -143,6 +143,11 @@ final class TsdbQuery implements Query {
     this.tsdb = tsdb;
     enable_fuzzy_filter = tsdb.getConfig()
         .getBoolean("tsd.query.enable_fuzzy_filter");
+  }
+
+  @Override
+  public Object clone()throws CloneNotSupportedException{
+    return super.clone();
   }
 
   /**
@@ -524,12 +529,18 @@ final class TsdbQuery implements Query {
         deferreds.add(tsdb.cache.findCache(cacheFragment));
       else{
         //copy object TsdbQuery
-        TsdbQuery newTsdbQuery = new TsdbQuery();
-        newTsdbQuery.setStartTime(cacheFragment.getStartTime());
-        newTsdbQuery.setEndTime(cacheFragment.getEndTime());
-        deferreds.add(newTsdbQuery.runRawAsync());
+        try{
+          //TsdbQuery tsdbQuery=new TsdbQuery(tsdb);
+          TsdbQuery newTsdbQuery = (TsdbQuery)this.clone();
+          newTsdbQuery.setStartTime(cacheFragment.getStartTime());
+          newTsdbQuery.setEndTime(cacheFragment.getEndTime());
+          deferreds.add(newTsdbQuery.runRawAsync());
+
+        }catch(CloneNotSupportedException c){}
+
       }
-    }
+
+      }
     class GroupFinished implements Callback<TreeMap<byte[], Span>, ArrayList<TreeMap<byte[], Span>>> {
       @Override
       public TreeMap<byte[], Span> call(final ArrayList<TreeMap<byte[], Span>> spans) {
