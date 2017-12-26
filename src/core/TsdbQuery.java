@@ -52,7 +52,7 @@ import net.opentsdb.utils.DateTime;
 /**
  * Non-synchronized implementation of {@link Query}.
  */
-  final class TsdbQuery implements Query, Cloneable {
+  final class TsdbQuery implements Query {
 
   private static final Logger LOG = LoggerFactory.getLogger(TsdbQuery.class);
 
@@ -143,11 +143,6 @@ import net.opentsdb.utils.DateTime;
     this.tsdb = tsdb;
     enable_fuzzy_filter = tsdb.getConfig()
         .getBoolean("tsd.query.enable_fuzzy_filter");
-  }
-
-  @Override
-  public Object clone()throws CloneNotSupportedException{
-    return super.clone();
   }
 
   /**
@@ -517,8 +512,22 @@ import net.opentsdb.utils.DateTime;
   }
 
 
-  public Deferred<TreeMap<byte[], Span>> runRawAsync() throws HBaseException {
+  private Deferred<TreeMap<byte[], Span>> runRawAsync() throws HBaseException {
     return findSpans();
+  }
+
+  // Not like a clone, but duplicate create new query of TsdbQuery
+  private TsdbQuery duplicate(){
+    TsdbQuery tsdbQuery = new TsdbQuery(tsdb);
+    tsdbQuery.start_time = start_time;
+    tsdbQuery.end_time = end_time;
+    tsdbQuery.aggregator = aggregator;
+    tsdbQuery.rate_options = rate_options;
+    tsdbQuery.downsampler = downsampler;
+    tsdbQuery.filters = filters;
+    tsdbQuery.explicit_tags = explicit_tags;
+    tsdbQuery.tsuids = tsuids;
+    return tsdbQuery;
   }
 
   private Deferred<TreeMap<byte[], Span>> buildFragmentAsync(ArrayList<CacheFragment> cacheFragments){
@@ -529,15 +538,11 @@ import net.opentsdb.utils.DateTime;
         deferreds.add(tsdb.cache.findCache(cacheFragment));
       else{
         //copy object TsdbQuery
-        try{
-          //TsdbQuery tsdbQuery=new TsdbQuery(tsdb);
-          TsdbQuery newTsdbQuery = (TsdbQuery)this.clone();
-          newTsdbQuery.setStartTime(cacheFragment.getStartTime());
-          newTsdbQuery.setEndTime(cacheFragment.getEndTime());
-          deferreds.add(newTsdbQuery.runRawAsync());
-
-        }catch(CloneNotSupportedException c){}
-
+        //TsdbQuery tsdbQuery=new TsdbQuery(tsdb);
+        TsdbQuery fragmentTsdbQuery = this.duplicate();
+        fragmentTsdbQuery.setStartTime(cacheFragment.getStartTime());
+        fragmentTsdbQuery.setEndTime(cacheFragment.getEndTime());
+        deferreds.add(fragmentTsdbQuery.runRawAsync());
       }
 
       }
@@ -573,10 +578,10 @@ import net.opentsdb.utils.DateTime;
 
   @Override
   public Deferred<DataPoints[]> runAsync() throws HBaseException {
-    return buildFragmentAsync(tsdb.cache.buildCacheFragments(this))
-      .addCallback(new GroupByAndAggregateCB());
+    //return buildFragmentAsync(tsdb.cache.buildCacheFragments(this))
+      //.addCallback(new GroupByAndAggregateCB());
     // Without Cache
-    // return findSpans().addCallback(new GroupByAndAggregateCB());
+    return findSpans().addCallback(new GroupByAndAggregateCB());
   }
 
   /**
@@ -595,7 +600,7 @@ import net.opentsdb.utils.DateTime;
     final TreeMap<byte[], Span> spans = // The key is a row key from HBase.
       new TreeMap<byte[], Span>(new SpanCmp(
           (short)(Const.SALT_WIDTH() + metric_width)));
-    
+
     // Copy only the filters that should trigger a tag resolution. If this list
     // is empty due to literals or a wildcard star, then we'll save a TON of
     // UID lookups
