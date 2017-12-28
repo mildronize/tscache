@@ -511,13 +511,15 @@ import net.opentsdb.utils.DateTime;
     }
   }
 
-
-  private Deferred<TreeMap<byte[], Span>> runRawAsync() throws HBaseException {
-    return findSpans();
-  }
+//
+//  private Deferred<TreeMap<byte[], Span>> runRawAsync() throws HBaseException {
+//    return findSpans();
+//  }
 
   // Not like a clone, but duplicate create new query of TsdbQuery
   private TsdbQuery duplicate(){
+    // TODO: (mildronize) manage query stats
+
     TsdbQuery tsdbQuery = new TsdbQuery(tsdb);
     tsdbQuery.start_time = start_time;
     tsdbQuery.end_time = end_time;
@@ -527,6 +529,11 @@ import net.opentsdb.utils.DateTime;
     tsdbQuery.filters = filters;
     tsdbQuery.explicit_tags = explicit_tags;
     tsdbQuery.tsuids = tsuids;
+    tsdbQuery.metric = metric;
+
+    tsdbQuery.group_bys = group_bys;
+    tsdbQuery.row_key_literals = row_key_literals;
+
     return tsdbQuery;
   }
 
@@ -542,8 +549,10 @@ import net.opentsdb.utils.DateTime;
         TsdbQuery fragmentTsdbQuery = this.duplicate();
         fragmentTsdbQuery.setStartTime(cacheFragment.getStartTime());
         fragmentTsdbQuery.setEndTime(cacheFragment.getEndTime());
-        deferreds.add(fragmentTsdbQuery.runRawAsync());
+        deferreds.add(fragmentTsdbQuery.findSpans());
+        //LOG.debug("Fragment: " + fragmentTsdbQuery);
       }
+
 
       }
     class GroupFinished implements Callback<TreeMap<byte[], Span>, ArrayList<TreeMap<byte[], Span>>> {
@@ -555,13 +564,14 @@ import net.opentsdb.utils.DateTime;
           new TreeMap<byte[], Span>(new SpanCmp(
             (short)(Const.SALT_WIDTH() + metric_width)));
 
+        LOG.debug("GroupFinished: Span size: " + spans.size());
         for(final TreeMap<byte[], Span> span : spans) {
+
+          for (Map.Entry<byte[], Span> element : span.entrySet())
+            LOG.debug("A Span Key: " + element.getKey() + "["+ Arrays.toString(element.getKey()) + "]| Value: " + element.getValue());
+
           for(Map.Entry<byte[], Span> entry : span.entrySet()) {
-            Span datapoints = result_spans.get(entry.getKey());
-            if (datapoints == null) {
-              datapoints = new Span(tsdb);
-              result_spans.put(entry.getKey(), datapoints);
-            }
+            result_spans.put(entry.getKey(), entry.getValue());
           }
         }
 
@@ -578,10 +588,10 @@ import net.opentsdb.utils.DateTime;
 
   @Override
   public Deferred<DataPoints[]> runAsync() throws HBaseException {
-    //return buildFragmentAsync(tsdb.cache.buildCacheFragments(this))
-      //.addCallback(new GroupByAndAggregateCB());
+    return buildFragmentAsync(tsdb.cache.buildCacheFragments(this))
+      .addCallback(new GroupByAndAggregateCB());
     // Without Cache
-    return findSpans().addCallback(new GroupByAndAggregateCB());
+    //return findSpans().addCallback(new GroupByAndAggregateCB());
   }
 
   /**
