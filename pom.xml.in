@@ -494,6 +494,12 @@
         <version>@AMQP_CLIENT_VERSION@</version>
     </dependency>
 
+    <dependency>
+        <groupId>net.spy</groupId>
+        <artifactId>spymemcached</artifactId>
+        <version>@SPYMEMCACHED_VERSION@</version>
+    </dependency>
+
   </dependencies>
 
   <properties>

@@ -215,7 +215,8 @@ tsdb_DEPS = \
 	$(SLF4J_API)	\
 	$(SUASYNC)	\
 	$(APACHE_MATH) \
-	$(AMQP_CLIENT)
+	$(AMQP_CLIENT) \
+	$(SPYMEMCACHED)
 
 if BIGTABLE
 tsdb_DEPS += \
