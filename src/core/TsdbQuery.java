@@ -553,7 +553,6 @@ import net.opentsdb.utils.DateTime;
         //LOG.debug("Fragment: " + fragmentTsdbQuery);
       }
 
-
       }
     class GroupFinished implements Callback<TreeMap<byte[], Span>, ArrayList<TreeMap<byte[], Span>>> {
       @Override
@@ -583,7 +582,28 @@ import net.opentsdb.utils.DateTime;
       }
     }
 
-    return Deferred.groupInOrder(deferreds).addCallback(new GroupFinished());
+    class StoreCached implements Callback<ArrayList<TreeMap<byte[], Span>>, ArrayList<TreeMap<byte[], Span>>> {
+      @Override
+      public ArrayList<TreeMap<byte[], Span>> call(final ArrayList<TreeMap<byte[], Span>> spans) {
+
+        final ArrayList<Deferred<Object>> deferreds = new ArrayList<Deferred<Object>>();
+
+        for (int i = 0; i < spans.size(); i++) {
+          if (!cacheFragments.get(i).isInCache()) {  // true in cache
+            // store in memcached
+            deferreds.add(tsdb.cache.storeCache(cacheFragments.get(i), spans[i]));
+          }
+        }
+        Deferred.groupInOrder(deferreds).join();
+        // and by pass the result to next callback
+        return spans;
+      }
+
+    }
+
+    return Deferred.groupInOrder(deferreds)
+      .addCallback(new StoreCached())
+      .addCallback(new GroupFinished());
   }
 
   @Override
