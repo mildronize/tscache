@@ -23,6 +23,7 @@ public class Cache {
   // Fragment Order = Ceil(Ti/range size)
   private int startFragmentOrder;
 
+
   // in seconds
   private int rangeSize;
 
@@ -65,7 +66,7 @@ public class Cache {
 
 
   private boolean isCacheIndexesEmpty(){
-    if ( isCacheIndexesEmpty == null) return true;
+    if ( true) return true;
     return false;
   }
 }
