@@ -5,6 +5,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.TreeMap;
 
 /**
@@ -27,17 +28,21 @@ public class Cache {
   // in seconds
   private int rangeSize;
 
-  // Number of hours in Range size
-  public void setRangeSize(int rangeSize) {
-    this.rangeSize = rangeSize * 3600;
+  // number of data per memcached key
+  private int numRangeSize;
+
+  // The period data of one row HBase ( default 1 hr (3600 second) )
+  private int HBaseRowPeriod = 3600;
+
+  public void setNumRangeSize(int numRangeSize) {
+    this.numRangeSize = numRangeSize;
+    rangeSize = numRangeSize * HBaseRowPeriod;
   }
 
   public Cache() {
     LOG.debug("Create Cache object");
 
-    // set range size 1 hr ( 3600 seconds )
-    setRangeSize(1);
-
+    setNumRangeSize(4);
   }
 
   public ArrayList<CacheFragment> buildCacheFragments(TsdbQuery tsdbQuery){
@@ -61,6 +66,20 @@ public class Cache {
     // save to memached
 
     // update cacheIndexes
+    return null;
+  }
+
+  // Convert TreeMap<Byte[], Span> (Raw data from hbase) into a pair of key and value, for storing in memcached
+  private HashMap<String, Byte[]> serialize(TreeMap<Byte[], Span> span){
+    // Assume that each span element is continuous data
+
+
+
+    return null;
+  }
+
+  // Convert a pair of key and value from memcached into TreeMap<Byte[], Span> (Raw data from hbase)
+  private TreeMap<Byte[], Span> deserialize(HashMap<String, Byte[]> cached){
     return null;
   }
 
