@@ -808,6 +808,7 @@ pom.xml: pom.xml.in Makefile
 	    -e 's/@JEXL_VERSION@/$(JEXL_VERSION)/' \
 	    -e 's/@JGRAPHT_VERSION@/$(JGRAPHT_VERSION)/' \
 	    -e 's/@AMQP_CLIENT_VERSION@/$(AMQP_CLIENT_VERSION)/' \
+	    -e 's/@SPYMEMCACHED_VERSION@/$(SPYMEMCACHED_VERSION)/' \
 	    -e 's/@spec_title@/$(spec_title)/' \
 	    -e 's/@spec_vendor@/$(spec_vendor)/' \
 	    -e 's/@spec_version@/$(PACKAGE_VERSION)/' \
