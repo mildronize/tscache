@@ -114,8 +114,52 @@ public class Cache {
     return null;
   }
 
+  private byte[] arrayListToBytes(ArrayList<byte[]> bytes){
+    int resultValueSize = 0;
+    for (byte[] tmp : tmpValues){
+      resultValueSize += tmp.length;
+    }
+
+    byte[] value = new byte[resultValueSize];
+    // Merge all byte arrayList into one byte array
+    int position = 0;
+    for (byte[] tmp : tmpValues){
+      System.arraycopy(tmp,0,value, position ,tmp.length);
+      position += tmp.length;
+    }
+    return value;
+  }
+
+  private byte[] generateRowSeqBytes(RowSeq row){
+    ArrayList<byte[]> tmpValues = new ArrayList<byte[]>();
+
+    tmpValues.add(numberToBytes(row.getKey().length, rowSeqKey_numBytes));
+    tmpValues.add(row.getKey());
+    tmpValues.add(numberToBytes(row.getQualifiers().length, rowSeqQualifier_numBytes));
+    tmpValues.add(row.getQualifiers());
+    tmpValues.add(numberToBytes(row.getQualifiers().length, rowSeqValue_numBytes));
+    tmpValues.add(row.getValues());
+
+    return arrayListToBytes(tmpValues);
+  }
+
+  private byte[] generateSpanBytes(Span span){
+    // Final result is Span content
+    ArrayList<byte[]> tmpValues = new ArrayList<byte[]>();
+    tmpValues.add(numberToBytes(span.getRows().size(), rowSeqCount_numBytes));
+
+    for(RowSeq row: span.getRows() ) {
+      byte[] tmp = generateRowSeqBytes(row);
+      tmpValues.add(numberToBytes(tmp.length, rowSeq_numBytes));
+      tmpValues.add(tmp);
+    }
+    return arrayListToBytes(tmpValues);
+  }
+
   // Convert TreeMap<Byte[], Span> (Raw data from hbase) into a pair of key and value, for storing in memcached
   private HashMap<String, byte[]> serialize(TreeMap<byte[], Span> span){
+    //TODO: Optimize size of variables and speed
+
     // Assume that each span element is continuous data
     HashMap<String, byte[]> result = new HashMap<String, byte[]>();
 
@@ -129,33 +173,17 @@ public class Cache {
 
     ArrayList<byte[]> tmpValues = new ArrayList<byte[]>();
     // Add Number of Span
+
     tmpValues.add(numberToBytes(span.size(),spanCount_numBytes));
     for (Map.Entry<byte[], Span> element : span.entrySet()){
-      // // Each span  ( it can be many RowSeq )
-      Span TmpSpan = element.getValue();
-      int spanSize = 0; // number of bytes in each Span
-      // Number of row seq
-      tmpValues.add(Bytes.fromShort((short)span.size()));
-      for(RowSeq row: TmpSpan.getRows() ) {
-        // find offset between the RowSeq and the key of group of RowSeq
-        tmpValues.add(row.getKey());
-        tmpValues.add(row.getQualifiers());
-        tmpValues.add(row.getValues());
-      }
+      Span tmpSpan = element.getValue();
+      // recursive start here
+      byte[] tmp = generateSpanBytes(tmpSpan);
+      tmpValues.add(numberToBytes(tmp.length, span_numBytes));
+      tmpValues.add(tmp);
     }
 
-    int resultValueSize = 0;
-    for (byte[] tmp : tmpValues){
-      resultValueSize += tmp.length;
-    }
-
-    byte[] value = new byte[resultValueSize];
-    // Merge all byte arrayList into one byte array
-    int position = 0;
-    for (byte[] tmp : tmpValues){
-      System.arraycopy(tmp,0,value, position ,tmp.length);
-      position += tmp.length;
-    }
+    byte[] value = arrayListToBytes(tmpValues);
 
     // coding
     result.put(key, value);
