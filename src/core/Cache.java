@@ -2,10 +2,12 @@ package net.opentsdb.core;
 
 import com.stumbleupon.async.Deferred;
 import com.sun.rowset.internal.Row;
+import org.hbase.async.Bytes;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.UnsupportedEncodingException;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.TreeMap;
@@ -39,6 +41,16 @@ public class Cache {
 
   // Default charset for byte-String conversion
   private String charset = "US-ASCII";
+
+  // Metadata size in byte
+  private final short spanCount_numBytes = 2; // numBytes of number of Span
+  private final short span_numBytes = 4; // numBytes of Span
+  private final short rowSeqCount_numBytes = 2;
+  private final short rowSeq_numBytes = 4;
+  private final short rowSeqKey_numBytes = 1;
+  private final short rowSeqQualifier_numBytes = 2;
+  private final short rowSeqValue_numBytes = 2;
+
 
   public void setNumRangeSize(int numRangeSize) {
     this.numRangeSize = numRangeSize;
@@ -90,6 +102,18 @@ public class Cache {
     return string.getBytes(charset);
   }
 
+  private byte[] numberToBytes(int n, int numBytes) {
+    if (numBytes == 1) {
+      byte[] b = new byte[1];
+      b[0] = (byte) n;
+      return b;
+    } else if (numBytes == 2)
+      return Bytes.fromShort((short) n);
+    else if (numBytes == 4)
+      return Bytes.fromInt(n);
+    return null;
+  }
+
   // Convert TreeMap<Byte[], Span> (Raw data from hbase) into a pair of key and value, for storing in memcached
   private HashMap<String, byte[]> serialize(TreeMap<byte[], Span> span){
     // Assume that each span element is continuous data
@@ -103,19 +127,26 @@ public class Cache {
       LOG.error(e.getMessage());
     }
 
-    int resultValueSize = 0;
     ArrayList<byte[]> tmpValues = new ArrayList<byte[]>();
+    // Add Number of Span
+    tmpValues.add(numberToBytes(span.size(),spanCount_numBytes));
     for (Map.Entry<byte[], Span> element : span.entrySet()){
-      //count all result value size
-      byte[] k = element.getKey();
-      tmpValues.add(k);
-      resultValueSize += k.length;
-      // in Span, can be many RowSeq
-      Span spanTmp = element.getValue();
-      for(RowSeq row: spanTmp.getRows() ) {
-
+      // // Each span  ( it can be many RowSeq )
+      Span TmpSpan = element.getValue();
+      int spanSize = 0; // number of bytes in each Span
+      // Number of row seq
+      tmpValues.add(Bytes.fromShort((short)span.size()));
+      for(RowSeq row: TmpSpan.getRows() ) {
+        // find offset between the RowSeq and the key of group of RowSeq
+        tmpValues.add(row.getKey());
+        tmpValues.add(row.getQualifiers());
+        tmpValues.add(row.getValues());
       }
+    }
 
+    int resultValueSize = 0;
+    for (byte[] tmp : tmpValues){
+      resultValueSize += tmp.length;
     }
 
     byte[] value = new byte[resultValueSize];
