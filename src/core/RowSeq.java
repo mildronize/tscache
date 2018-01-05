@@ -41,8 +41,16 @@ final class RowSeq implements DataPoints {
   /** The {@link TSDB} instance we belong to. */
   private final TSDB tsdb;
 
+  public byte[] getKey() {
+    return key;
+  }
+
   /** First row key. */
   byte[] key;
+
+  public byte[] getQualifiers() {
+    return qualifiers;
+  }
 
   /**
    * Qualifiers for individual data points.
@@ -53,6 +61,10 @@ final class RowSeq implements DataPoints {
    * store a delta in seconds from the base timestamp stored in the row key.
    */
   private byte[] qualifiers;
+
+  public byte[] getValues() {
+    return values;
+  }
 
   /** Values in the row.  */
   private byte[] values;
