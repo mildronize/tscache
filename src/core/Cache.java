@@ -1,13 +1,11 @@
 package net.opentsdb.core;
 
 import com.stumbleupon.async.Deferred;
-import com.sun.rowset.internal.Row;
 import org.hbase.async.Bytes;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.UnsupportedEncodingException;
-import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.TreeMap;
@@ -87,6 +85,7 @@ public class Cache {
     return null;
   }
 
+
   // Example TreeMap
 //
 //  Key: [B@b58523d.
@@ -112,6 +111,19 @@ public class Cache {
     else if (numBytes == 4)
       return Bytes.fromInt(n);
     return null;
+  }
+
+  private long getNumberBytesRange(byte[] bytes, int start, int len){
+    long result;
+    byte[] tmp = new byte[len];
+    byte[] tmp2 = {0,0,0,0};
+    System.arraycopy(bytes, start, tmp, 0, len);
+    // 1 , 5A
+    for (int i = tmp.length - 1 ; i >= 0 ;i--){
+      tmp2[i] = tmp[i];
+    }
+    result = Bytes.getUnsignedInt(tmp2);
+    return result;
   }
 
   private byte[] arrayListToBytes(ArrayList<byte[]> bytes){
@@ -159,6 +171,7 @@ public class Cache {
   // Convert TreeMap<Byte[], Span> (Raw data from hbase) into a pair of key and value, for storing in memcached
   private HashMap<String, byte[]> serialize(TreeMap<byte[], Span> span){
     //TODO: Optimize size of variables and speed
+    // TODO: Now All Span is stored in one key *****
 
     // Assume that each span element is continuous data
     HashMap<String, byte[]> result = new HashMap<String, byte[]>();
@@ -177,7 +190,6 @@ public class Cache {
     tmpValues.add(numberToBytes(span.size(),spanCount_numBytes));
     for (Map.Entry<byte[], Span> element : span.entrySet()){
       Span tmpSpan = element.getValue();
-      // recursive start here
       byte[] tmp = generateSpanBytes(tmpSpan);
       tmpValues.add(numberToBytes(tmp.length, span_numBytes));
       tmpValues.add(tmp);
@@ -191,7 +203,24 @@ public class Cache {
   }
 
   // Convert a pair of key and value from memcached into TreeMap<Byte[], Span> (Raw data from hbase)
-  private TreeMap<Byte[], Span> deserialize(HashMap<String, Byte[]> cached){
+  private TreeMap<byte[], Span> deserialize(HashMap<String, byte[]> cached){
+    TreeMap<byte[], Span> result = new TreeMap<byte[], Span>();
+    // Assume that `cached` has only one element
+
+    byte[] cachedValue = cached.entrySet().iterator().next().getValue();
+
+    int current = 0;
+
+    // plus current
+    // got number of span
+    long num_Span = getNumberBytesRange(cachedValue, current, spanCount_numBytes);
+
+
+
+    // add detail of each Span in `result`
+
+
+
     return null;
   }
 
