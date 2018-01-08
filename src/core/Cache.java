@@ -27,6 +27,7 @@ public class Cache {
   // Fragment Order = Ceil(Ti/range size)
   private int startFragmentOrder;
 
+  private TSDB tsdb;
 
   // in seconds
   private int rangeSize;
@@ -42,9 +43,9 @@ public class Cache {
 
   // Metadata size in byte
   private final short spanCount_numBytes = 2; // numBytes of number of Span
-  private final short span_numBytes = 4; // numBytes of Span
+  private final short spanLength_numBytes = 4; // numBytes of Span
   private final short rowSeqCount_numBytes = 2;
-  private final short rowSeq_numBytes = 4;
+  private final short rowSeqLength_numBytes = 4;
   private final short rowSeqKey_numBytes = 1;
   private final short rowSeqQualifier_numBytes = 2;
   private final short rowSeqValue_numBytes = 2;
@@ -55,9 +56,9 @@ public class Cache {
     rangeSize = numRangeSize * HBaseRowPeriod;
   }
 
-  public Cache() {
+  public Cache(TSDB tsdb) {
     LOG.debug("Create Cache object");
-
+    this.tsdb = tsdb;
     setNumRangeSize(4);
   }
 
@@ -101,6 +102,8 @@ public class Cache {
     return string.getBytes(charset);
   }
 
+  //  ---- serialize helper function -----
+
   private byte[] numberToBytes(int n, int numBytes) {
     if (numBytes == 1) {
       byte[] b = new byte[1];
@@ -113,29 +116,16 @@ public class Cache {
     return null;
   }
 
-  private long getNumberBytesRange(byte[] bytes, int start, int len){
-    long result;
-    byte[] tmp = new byte[len];
-    byte[] tmp2 = {0,0,0,0};
-    System.arraycopy(bytes, start, tmp, 0, len);
-    // 1 , 5A
-    for (int i = tmp.length - 1 ; i >= 0 ;i--){
-      tmp2[i] = tmp[i];
-    }
-    result = Bytes.getUnsignedInt(tmp2);
-    return result;
-  }
-
   private byte[] arrayListToBytes(ArrayList<byte[]> bytes){
     int resultValueSize = 0;
-    for (byte[] tmp : tmpValues){
+    for (byte[] tmp : bytes){
       resultValueSize += tmp.length;
     }
 
     byte[] value = new byte[resultValueSize];
     // Merge all byte arrayList into one byte array
     int position = 0;
-    for (byte[] tmp : tmpValues){
+    for (byte[] tmp : bytes){
       System.arraycopy(tmp,0,value, position ,tmp.length);
       position += tmp.length;
     }
@@ -162,7 +152,7 @@ public class Cache {
 
     for(RowSeq row: span.getRows() ) {
       byte[] tmp = generateRowSeqBytes(row);
-      tmpValues.add(numberToBytes(tmp.length, rowSeq_numBytes));
+      tmpValues.add(numberToBytes(tmp.length, rowSeqLength_numBytes));
       tmpValues.add(tmp);
     }
     return arrayListToBytes(tmpValues);
@@ -175,10 +165,11 @@ public class Cache {
 
     // Assume that each span element is continuous data
     HashMap<String, byte[]> result = new HashMap<String, byte[]>();
-
+    String key;
     // Get first key of the span
+
     try {
-      String key = bytesToString(span.entrySet().iterator().next().getKey());
+      key = bytesToString(span.entrySet().iterator().next().getKey());
     }catch(UnsupportedEncodingException e){
       // TODO: use errorback to handle exception
       LOG.error(e.getMessage());
@@ -191,7 +182,7 @@ public class Cache {
     for (Map.Entry<byte[], Span> element : span.entrySet()){
       Span tmpSpan = element.getValue();
       byte[] tmp = generateSpanBytes(tmpSpan);
-      tmpValues.add(numberToBytes(tmp.length, span_numBytes));
+      tmpValues.add(numberToBytes(tmp.length, spanLength_numBytes));
       tmpValues.add(tmp);
     }
 
@@ -202,6 +193,68 @@ public class Cache {
     return result;
   }
 
+  //  ---- Deserialize helper function -----
+
+  private long getNumberBytesRange(byte[] bytes, long start, long len){
+    long result;
+    byte[] tmp = new byte[(int)len];
+    byte[] tmp2 = {0,0,0,0};
+    System.arraycopy(bytes, (int)start, tmp, 0, (int)len);
+    // 1 , 5A
+    for (int i = tmp.length - 1 ; i >= 0 ;i--){
+      tmp2[i] = tmp[i];
+    }
+    result = Bytes.getUnsignedInt(tmp2);
+    return result;
+  }
+
+  private RowSeq bytesRangeToRowSeq(byte[] bytes, long cursor) {
+    RowSeq rowSeq = new RowSeq(tsdb);
+    byte[] key;
+    byte[] qualifiers;
+    byte[] values;
+    // Get key
+    long keyLength = getNumberBytesRange(bytes, cursor, rowSeqKey_numBytes);
+    cursor +=  rowSeqKey_numBytes;
+    key = new byte[(int)keyLength];
+    System.arraycopy(bytes, (int)cursor, key, 0, (int)keyLength);
+    cursor += keyLength;
+    rowSeq.setKey(key);
+
+    // Get qualifiers
+    long qualifiersLength = getNumberBytesRange(bytes, cursor, rowSeqQualifier_numBytes);
+    cursor +=  rowSeqQualifier_numBytes;
+    qualifiers = new byte[(int)qualifiersLength];
+    System.arraycopy(bytes, (int)cursor, qualifiers, 0, (int)qualifiersLength);
+    cursor += qualifiersLength;
+    rowSeq.setQualifiers(qualifiers);
+
+    // Get values
+    long valuesLength = getNumberBytesRange(bytes, cursor, rowSeqValue_numBytes);
+    cursor +=  rowSeqValue_numBytes;
+    values = new byte[(int)valuesLength];
+    System.arraycopy(bytes, (int)cursor, values, 0, (int)valuesLength);
+    cursor += valuesLength;
+    rowSeq.setValues(values);
+
+    return rowSeq;
+  }
+
+  private Span bytesRangeToSpan(byte[] bytes, long cursor, long len){
+    Span span = new Span(tsdb);
+    long rowSeqCount = getNumberBytesRange(bytes, cursor, rowSeqCount_numBytes);
+    cursor += rowSeqCount_numBytes;
+
+    for (int i = 0 ;i < rowSeqCount;i++) {
+      long rowSeq_length = getNumberBytesRange(bytes, cursor, rowSeqLength_numBytes);
+      cursor += rowSeqLength_numBytes;
+      span.addRowSeq(bytesRangeToRowSeq(bytes, cursor));
+      cursor += rowSeqLength_numBytes + rowSeq_length;
+    }
+
+    return span;
+}
+
   // Convert a pair of key and value from memcached into TreeMap<Byte[], Span> (Raw data from hbase)
   private TreeMap<byte[], Span> deserialize(HashMap<String, byte[]> cached){
     TreeMap<byte[], Span> result = new TreeMap<byte[], Span>();
@@ -209,19 +262,25 @@ public class Cache {
 
     byte[] cachedValue = cached.entrySet().iterator().next().getValue();
 
-    int current = 0;
+    long cursor = 0;
 
     // plus current
     // got number of span
-    long num_Span = getNumberBytesRange(cachedValue, current, spanCount_numBytes);
 
-
+    long spanCount = getNumberBytesRange(cachedValue, cursor, spanCount_numBytes);
+    cursor += spanCount_numBytes;
+    for (int i = 0;i < spanCount; i++){
+      long span_length = getNumberBytesRange(cachedValue, cursor, spanLength_numBytes);
+      // get key from first row seq of Span
+      byte[] key = {(byte)0};
+      result.put(key, bytesRangeToSpan(cachedValue, cursor, span_length));
+      // Move cursor to Next Span
+      cursor += spanLength_numBytes + span_length;
+    }
 
     // add detail of each Span in `result`
 
-
-
-    return null;
+    return result;
   }
 
 

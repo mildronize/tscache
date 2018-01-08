@@ -45,6 +45,18 @@ final class RowSeq implements DataPoints {
     return key;
   }
 
+  public void setKey(byte[] key) {
+    this.key = key;
+  }
+
+  public void setQualifiers(byte[] qualifiers) {
+    this.qualifiers = qualifiers;
+  }
+
+  public void setValues(byte[] values) {
+    this.values = values;
+  }
+
   /** First row key. */
   byte[] key;
 

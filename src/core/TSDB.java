@@ -148,7 +148,7 @@ public final class TSDB {
   /** Datapoints Added */
   private static final AtomicLong datapoints_added = new AtomicLong();
 
-  public Cache cache = new Cache();
+  public Cache cache = new Cache(this);
   /**
    * Constructor
    * @param client An initialized HBase client object

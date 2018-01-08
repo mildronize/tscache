@@ -42,6 +42,10 @@ final class Span implements DataPoints {
     return rows;
   }
 
+  public boolean addRowSeq(RowSeq rowSeq) {
+    return rows.add(rowSeq);
+  }
+
   /** All the rows in this span. */
   private final ArrayList<RowSeq> rows = new ArrayList<RowSeq>();
 
