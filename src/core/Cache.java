@@ -22,7 +22,7 @@ public class Cache {
   private static final Logger LOG = LoggerFactory.getLogger(Cache.class);
 
   // May be byte data structure for looking fast
-  private ArrayList<long[]> cacheIndexes;
+  private ArrayList<long[]> cacheIndexes = null;
 
   // Fragment Order = Ceil(Ti/range size)
   private int startFragmentOrder;
@@ -69,23 +69,34 @@ public class Cache {
     if(isCacheIndexesEmpty()) {
       CacheFragment cacheFragment = new CacheFragment(tsdbQuery.getStartTime(), tsdbQuery.getEndTime(), false);
       cacheFragments.add(cacheFragment);
+    }else {
+
     }
+    // XOR operation for finding which part in cache or not?
 
     return cacheFragments;
   }
 
   public Deferred<TreeMap<byte[], Span>> findCache(CacheFragment fragment){
+    // get time
+    long startTime = fragment.getStartTime();
+    long endTime = fragment.getEndTime();
+
+    // calc
+
     // find in cache
+
     return null;
   }
 
   public Deferred<Object> storeCache(CacheFragment cacheFragment, TreeMap<byte[], Span> result){
     // save to memached
 
+    // a result (TreeMap<byte[], Span>) can be more than one
+
     // update cacheIndexes
     return null;
   }
-
 
   // Example TreeMap
 //
@@ -285,7 +296,8 @@ public class Cache {
 
 
   private boolean isCacheIndexesEmpty(){
-    if ( true) return true;
+    if ( cacheIndexes == null ) return true;
+    if ( cacheIndexes.size() == 0) return true;
     return false;
   }
 }

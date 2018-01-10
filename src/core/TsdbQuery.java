@@ -25,6 +25,8 @@ import java.util.Set;
 import java.util.TreeMap;
 
 import net.opentsdb.tree.Tree;
+import net.opentsdb.tsd.BadRequestException;
+import org.jboss.netty.handler.codec.http.HttpResponseStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.hbase.async.Bytes;
@@ -537,7 +539,7 @@ import net.opentsdb.utils.DateTime;
     return tsdbQuery;
   }
 
-  private Deferred<TreeMap<byte[], Span>> buildFragmentAsync(ArrayList<CacheFragment> cacheFragments){
+  private Deferred<TreeMap<byte[], Span>> buildFragmentAsync(final ArrayList<CacheFragment> cacheFragments){
     final ArrayList<Deferred<TreeMap<byte[], Span>>> deferreds = new ArrayList<Deferred<TreeMap<byte[], Span>>>();
 
     for (final CacheFragment cacheFragment: cacheFragments){
@@ -582,28 +584,41 @@ import net.opentsdb.utils.DateTime;
       }
     }
 
-//    class StoreCached implements Callback<ArrayList<TreeMap<byte[], Span>>, ArrayList<TreeMap<byte[], Span>>> {
-//      @Override
-//      public ArrayList<TreeMap<byte[], Span>> call(final ArrayList<TreeMap<byte[], Span>> spans) {
-//
-//        final ArrayList<Deferred<Object>> deferreds = new ArrayList<Deferred<Object>>();
-//
-//        for (int i = 0; i < spans.size(); i++) {
-//          if (!cacheFragments.get(i).isInCache()) {  // true in cache
-//            // store in memcached
-//            deferreds.add(tsdb.cache.storeCache(cacheFragments.get(i), spans.get(i)));
-//          }
-//        }
-//        Deferred.groupInOrder(deferreds).join();
-//        // and by pass the result to next callback
-//        return spans;
-//      }
-//
-//    }
+    class StoreCachedCB implements Callback<ArrayList<TreeMap<byte[], Span>>, ArrayList<TreeMap<byte[], Span>>> {
+      @Override
+      public ArrayList<TreeMap<byte[], Span>> call(final ArrayList<TreeMap<byte[], Span>> spans) {
+
+        final ArrayList<Deferred<Object>> deferreds = new ArrayList<Deferred<Object>>();
+
+        for (int i = 0; i < spans.size(); i++) {
+          if (!cacheFragments.get(i).isInCache()) {  // true in cache
+            // store in memcached
+            deferreds.add(tsdb.cache.storeCache(cacheFragments.get(i), spans.get(i)));
+          }
+        }
+
+        try {
+          Deferred.groupInOrder(deferreds).join();
+        } catch (Exception e) {
+          throw new BadRequestException(HttpResponseStatus.BAD_REQUEST,
+            e.getMessage(), "Store cached error", e);
+        }
+        // and by pass the result to next callback
+        return spans;
+      }
+
+    }
+
+    class ErrorCB implements Callback<Object, Exception> {
+      public Object call(final Exception e) throws Exception {
+        return null;
+      }
+    }
 
     return Deferred.groupInOrder(deferreds)
-//      .addCallback(new StoreCached())
-      .addCallback(new GroupFinished());
+      .addCallback(new StoreCachedCB())
+      .addCallback(new GroupFinished())
+      .addErrback(new ErrorCB());
   }
 
   @Override
