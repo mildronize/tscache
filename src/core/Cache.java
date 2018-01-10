@@ -29,10 +29,7 @@ public class Cache {
 
   private TSDB tsdb;
 
-  // in seconds
-  private int rangeSize;
-
-  // number of data per memcached key
+  // number of data(RowSeq) per memcached key
   private int numRangeSize;
 
   // The period data of one row HBase ( default 1 hr (3600 second) )
@@ -50,16 +47,18 @@ public class Cache {
   private final short rowSeqQualifier_numBytes = 2;
   private final short rowSeqValue_numBytes = 2;
 
+  private int startTimeToFragmentOrder(long time){
+    return (int)Math.floor(time/(numRangeSize * HBaseRowPeriod));
+  }
 
-  public void setNumRangeSize(int numRangeSize) {
-    this.numRangeSize = numRangeSize;
-    rangeSize = numRangeSize * HBaseRowPeriod;
+  private int endTimeToFragmentOrder(long time){
+    return (int)Math.ceil(time/(numRangeSize * HBaseRowPeriod));
   }
 
   public Cache(TSDB tsdb) {
     LOG.debug("Create Cache object");
     this.tsdb = tsdb;
-    setNumRangeSize(4);
+    this.numRangeSize = 4;
   }
 
   public ArrayList<CacheFragment> buildCacheFragments(TsdbQuery tsdbQuery){
@@ -91,6 +90,12 @@ public class Cache {
 
   public Deferred<Object> storeCache(CacheFragment cacheFragment, TreeMap<byte[], Span> result){
     // save to memached
+    // find fragment order of start & end time
+    long startTime = cacheFragment.getStartTime();
+    long endTime = cacheFragment.getEndTime();
+    int start_fo = startTimeToFragmentOrder(startTime);
+    int end_fo = endTimeToFragmentOrder(endTime);
+
 
     // a result (TreeMap<byte[], Span>) can be more than one
 
@@ -170,7 +175,7 @@ public class Cache {
   }
 
   // Convert TreeMap<Byte[], Span> (Raw data from hbase) into a pair of key and value, for storing in memcached
-  private HashMap<String, byte[]> serialize(TreeMap<byte[], Span> span){
+  private HashMap<String, byte[]> serializeSpan(TreeMap<byte[], Span> span){
     //TODO: Optimize size of variables and speed
     // TODO: Now All Span is stored in one key *****
 
@@ -184,6 +189,7 @@ public class Cache {
     }catch(UnsupportedEncodingException e){
       // TODO: use errorback to handle exception
       LOG.error(e.getMessage());
+      return null;
     }
 
     ArrayList<byte[]> tmpValues = new ArrayList<byte[]>();
@@ -203,6 +209,41 @@ public class Cache {
     result.put(key, value);
     return result;
   }
+
+//  private HashMap<String, byte[]> serializeRowSeq(ArrayList<RowSeq> rows){
+//    //TODO: Optimize size of variables and speed
+//    // TODO: Now All Span is stored in one key *****
+//
+//    // Assume that each span element is continuous data
+//    HashMap<String, byte[]> result = new HashMap<String, byte[]>();
+//    String key;
+//    // Get first key of the span
+//
+//    try {
+//      key = bytesToString(span.entrySet().iterator().next().getKey());
+//    }catch(UnsupportedEncodingException e){
+//      // TODO: use errorback to handle exception
+//      LOG.error(e.getMessage());
+//      return null;
+//    }
+//
+//    ArrayList<byte[]> tmpValues = new ArrayList<byte[]>();
+//    // Add Number of Span
+//
+//    tmpValues.add(numberToBytes(span.size(),spanCount_numBytes));
+//    for (Map.Entry<byte[], Span> element : span.entrySet()){
+//      Span tmpSpan = element.getValue();
+//      byte[] tmp = generateSpanBytes(tmpSpan);
+//      tmpValues.add(numberToBytes(tmp.length, spanLength_numBytes));
+//      tmpValues.add(tmp);
+//    }
+//
+//    byte[] value = arrayListToBytes(tmpValues);
+//
+//    // coding
+//    result.put(key, value);
+//    return result;
+//  }
 
   //  ---- Deserialize helper function -----
 
