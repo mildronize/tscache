@@ -47,19 +47,13 @@ public class Cache {
   private final short rowSeqQualifier_numBytes = 2;
   private final short rowSeqValue_numBytes = 2;
 
-  private int startTimeToFragmentOrder(long time){
-    return (int)Math.floor(time/(numRangeSize * HBaseRowPeriod));
-  }
-
-  private int endTimeToFragmentOrder(long time){
-    return (int)Math.ceil(time/(numRangeSize * HBaseRowPeriod));
-  }
-
   public Cache(TSDB tsdb) {
     LOG.debug("Create Cache object");
     this.tsdb = tsdb;
     this.numRangeSize = 4;
   }
+
+
 
   public ArrayList<CacheFragment> buildCacheFragments(TsdbQuery tsdbQuery){
     ArrayList<CacheFragment> cacheFragments = new ArrayList<CacheFragment>();
@@ -88,18 +82,87 @@ public class Cache {
     return null;
   }
 
-  public Deferred<Object> storeCache(CacheFragment cacheFragment, TreeMap<byte[], Span> result){
+  // -------------------------- //
+  // storeCache helper functions //
+  // -------------------------- //
+
+  private int startTimeToFragmentOrder(long time){
+    return (int)Math.ceil(time/(numRangeSize * HBaseRowPeriod));
+  }
+
+  private int endTimeToFragmentOrder(long time){
+    return (int)Math.floor(time/(numRangeSize * HBaseRowPeriod));
+  }
+
+  private int findStartRowSeq(ArrayList<RowSeq> rowSeqs, long startTime_fo){
+    int i;
+    for ( i = 0; i < rowSeqs.size(); i++) {
+      long baseTime = rowSeqs.get(i).baseTime();
+      if (baseTime >= startTime_fo && baseTime < startTime_fo + HBaseRowPeriod ){
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  public Deferred<Object> storeCache(CacheFragment fragment, TreeMap<byte[], Span> spans){
     // save to memached
     // find fragment order of start & end time
-    long startTime = cacheFragment.getStartTime();
-    long endTime = cacheFragment.getEndTime();
+
+    long startTime = fragment.getStartTime();
+    long endTime = fragment.getEndTime();
+
     int start_fo = startTimeToFragmentOrder(startTime);
-    int end_fo = endTimeToFragmentOrder(endTime);
+    int end_fo = endTimeToFragmentOrder(endTime); // Not include end fragment order
 
-
+    long startTime_fo = start_fo * HBaseRowPeriod;
+    long endTime_fo = end_fo * HBaseRowPeriod;
     // a result (TreeMap<byte[], Span>) can be more than one
 
-    // update cacheIndexes
+    // The number of rest of RowSeq in previous Span
+    int remainingRowSeq = 0;
+    ArrayList<RowSeq> restRowSeq = null;
+    int spanCount = 0;
+    for(Map.Entry<byte[], Span> entry : spans.entrySet()) {
+      // Group row key
+      Span span = entry.getValue();  // ignore the key
+      ArrayList<RowSeq> rowSeqs = span.getRows();
+      int i;
+      int start_rowSeq = 0;
+      // First span only for defining starting fragment order
+      if (spanCount == 0){
+        start_rowSeq = findStartRowSeq(rowSeqs, startTime_fo);
+        if (start_rowSeq < 0 ){
+          return Deferred.fromError(new Exception("Can't find starting rowSeq fragment order"));
+        }
+      } else if (remainingRowSeq > 0 ){
+        // This condition will happen on up to 2 spans only
+        // if it remain some rowSeq in previous Span, merge `restRowSeq` and rowSeq of this Span
+        ArrayList<RowSeq> tmp = new ArrayList<RowSeq>();
+        tmp.addAll(restRowSeq);
+        tmp.addAll(new ArrayList<RowSeq>(rowSeqs.subList( 0 , numRangeSize - remainingRowSeq)));
+        start_rowSeq = numRangeSize - remainingRowSeq;
+        HashMap<String, byte[]> item = serializeRowSeq(tmp);
+        // TODO: send `item` to cache
+      }
+
+
+      // TODO: bottleneck processing
+      for(i = start_rowSeq; i< rowSeqs.size(); i+= numRangeSize) {
+        HashMap<String, byte[]> item = serializeRowSeq(rowSeqs, i, numRangeSize);
+        // TODO: send `item` to cache
+      }
+      remainingRowSeq = i - rowSeqs.size();
+      if (remainingRowSeq > 0 ){
+        // copy the rest of this rowseq into `restRowSeq`
+        restRowSeq = new ArrayList<RowSeq>(rowSeqs.subList( i - numRangeSize , i - numRangeSize + remainingRowSeq));
+      }
+      // No need to define ending fragment order
+      // In the Last Span if `remainingRowSeq` > 0 means we leave the rest!
+      spanCount ++;
+    }
+
+    // TODO: update cacheIndexes
     return null;
   }
 
@@ -118,7 +181,9 @@ public class Cache {
     return string.getBytes(charset);
   }
 
-  //  ---- serialize helper function -----
+  // -------------------------- //
+  // Serialize helper functions //
+  // -------------------------- //
 
   private byte[] numberToBytes(int n, int numBytes) {
     if (numBytes == 1) {
@@ -161,21 +226,14 @@ public class Cache {
     return arrayListToBytes(tmpValues);
   }
 
-  private byte[] generateSpanBytes(Span span){
-    // Final result is Span content
-    ArrayList<byte[]> tmpValues = new ArrayList<byte[]>();
-    tmpValues.add(numberToBytes(span.getRows().size(), rowSeqCount_numBytes));
-
-    for(RowSeq row: span.getRows() ) {
-      byte[] tmp = generateRowSeqBytes(row);
-      tmpValues.add(numberToBytes(tmp.length, rowSeqLength_numBytes));
-      tmpValues.add(tmp);
-    }
-    return arrayListToBytes(tmpValues);
+  // group all of RowSeq into a key ( in cache )
+  private HashMap<String, byte[]> serializeRowSeq(ArrayList<RowSeq> rowSeqs){
+    return serializeRowSeq(rowSeqs, 0, rowSeqs.size());
   }
 
   // Convert TreeMap<Byte[], Span> (Raw data from hbase) into a pair of key and value, for storing in memcached
-  private HashMap<String, byte[]> serializeSpan(TreeMap<byte[], Span> span){
+  // group all of RowSeq into a key ( in cache ) in range
+  private HashMap<String, byte[]> serializeRowSeq(ArrayList<RowSeq> rowSeqs, int start, int length){
     //TODO: Optimize size of variables and speed
     // TODO: Now All Span is stored in one key *****
 
@@ -183,69 +241,33 @@ public class Cache {
     HashMap<String, byte[]> result = new HashMap<String, byte[]>();
     String key;
     // Get first key of the span
-
     try {
-      key = bytesToString(span.entrySet().iterator().next().getKey());
-    }catch(UnsupportedEncodingException e){
+      key = bytesToString(rowSeqs.get(0).getKey());
+    }catch (IndexOutOfBoundsException e) {
+      // TODO: use errorback to handle exception
+      LOG.error(e.getMessage());
+      return null;
+    } catch(UnsupportedEncodingException e){
       // TODO: use errorback to handle exception
       LOG.error(e.getMessage());
       return null;
     }
-
+    // Perform value
     ArrayList<byte[]> tmpValues = new ArrayList<byte[]>();
     // Add Number of Span
-
-    tmpValues.add(numberToBytes(span.size(),spanCount_numBytes));
-    for (Map.Entry<byte[], Span> element : span.entrySet()){
-      Span tmpSpan = element.getValue();
-      byte[] tmp = generateSpanBytes(tmpSpan);
-      tmpValues.add(numberToBytes(tmp.length, spanLength_numBytes));
+    for(int i = start; i< length; i++) {
+      byte[] tmp = generateRowSeqBytes(rowSeqs.get(i));
+      tmpValues.add(numberToBytes(tmp.length, rowSeqLength_numBytes));
       tmpValues.add(tmp);
     }
-
     byte[] value = arrayListToBytes(tmpValues);
-
-    // coding
     result.put(key, value);
     return result;
   }
 
-//  private HashMap<String, byte[]> serializeRowSeq(ArrayList<RowSeq> rows){
-//    //TODO: Optimize size of variables and speed
-//    // TODO: Now All Span is stored in one key *****
-//
-//    // Assume that each span element is continuous data
-//    HashMap<String, byte[]> result = new HashMap<String, byte[]>();
-//    String key;
-//    // Get first key of the span
-//
-//    try {
-//      key = bytesToString(span.entrySet().iterator().next().getKey());
-//    }catch(UnsupportedEncodingException e){
-//      // TODO: use errorback to handle exception
-//      LOG.error(e.getMessage());
-//      return null;
-//    }
-//
-//    ArrayList<byte[]> tmpValues = new ArrayList<byte[]>();
-//    // Add Number of Span
-//
-//    tmpValues.add(numberToBytes(span.size(),spanCount_numBytes));
-//    for (Map.Entry<byte[], Span> element : span.entrySet()){
-//      Span tmpSpan = element.getValue();
-//      byte[] tmp = generateSpanBytes(tmpSpan);
-//      tmpValues.add(numberToBytes(tmp.length, spanLength_numBytes));
-//      tmpValues.add(tmp);
-//    }
-//
-//    byte[] value = arrayListToBytes(tmpValues);
-//
-//    // coding
-//    result.put(key, value);
-//    return result;
-//  }
-
-  //  ---- Deserialize helper function -----
+  // ---------------------------- //
+  // Deserialize helper functions //
+  // ---------------------------- //
 
   private long getNumberBytesRange(byte[] bytes, long start, long len){
     long result;
@@ -305,36 +327,7 @@ public class Cache {
     }
 
     return span;
-}
-
-  // Convert a pair of key and value from memcached into TreeMap<Byte[], Span> (Raw data from hbase)
-  private TreeMap<byte[], Span> deserialize(HashMap<String, byte[]> cached){
-    TreeMap<byte[], Span> result = new TreeMap<byte[], Span>();
-    // Assume that `cached` has only one element
-
-    byte[] cachedValue = cached.entrySet().iterator().next().getValue();
-
-    long cursor = 0;
-
-    // plus current
-    // got number of span
-
-    long spanCount = getNumberBytesRange(cachedValue, cursor, spanCount_numBytes);
-    cursor += spanCount_numBytes;
-    for (int i = 0;i < spanCount; i++){
-      long span_length = getNumberBytesRange(cachedValue, cursor, spanLength_numBytes);
-      // get key from first row seq of Span
-      byte[] key = {(byte)0};
-      result.put(key, bytesRangeToSpan(cachedValue, cursor, span_length));
-      // Move cursor to Next Span
-      cursor += spanLength_numBytes + span_length;
-    }
-
-    // add detail of each Span in `result`
-
-    return result;
   }
-
 
   private boolean isCacheIndexesEmpty(){
     if ( cacheIndexes == null ) return true;
