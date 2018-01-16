@@ -3,6 +3,6 @@ SPYMEMCACHED := third_party/spymemcached/spymemcached-$(SPYMEMCACHED_VERSION).ja
 SPYMEMCACHED_BASE_URL := http://central.maven.org/maven2/net/spy/spymemcached/$(SPYMEMCACHED_VERSION)
 
 $(SPYMEMCACHED): $(SPYMEMCACHED).md5
-  set dummy "$(SPYMEMCACHED_BASE_URL)" "$(SPYMEMCACHED)"; shift; $(FETCH_DEPENDENCY)
+	set dummy "$(SPYMEMCACHED_BASE_URL)" "$(SPYMEMCACHED)"; shift; $(FETCH_DEPENDENCY)
 
 THIRD_PARTY += $(SPYMEMCACHED)
