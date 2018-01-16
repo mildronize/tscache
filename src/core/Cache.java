@@ -1,15 +1,21 @@
 package net.opentsdb.core;
 
+import com.stumbleupon.async.Callback;
 import com.stumbleupon.async.Deferred;
+import net.spy.memcached.MemcachedClient;
+import net.spy.memcached.internal.OperationFuture;
 import org.hbase.async.Bytes;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
 import java.io.UnsupportedEncodingException;
+import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.TreeMap;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Cache module
@@ -46,6 +52,11 @@ public class Cache {
   private final short rowSeqKey_numBytes = 1;
   private final short rowSeqQualifier_numBytes = 2;
   private final short rowSeqValue_numBytes = 2;
+
+  private final String memcachedHost = "memcached";
+  private final int memcachedPort = 11211;
+  private final int memcachedExpiredTime = 20;
+  private final int memcachedVerifyingTime = 1;
 
   public Cache(TSDB tsdb) {
     LOG.debug("Create Cache object");
@@ -95,19 +106,47 @@ public class Cache {
   }
 
   private int findStartRowSeq(ArrayList<RowSeq> rowSeqs, long startTime_fo){
+    LOG.debug("start findStartRowSeq");
+    LOG.debug(startTime_fo+"");
     int i;
     for ( i = 0; i < rowSeqs.size(); i++) {
       long baseTime = rowSeqs.get(i).baseTime();
-      if (baseTime >= startTime_fo && baseTime < startTime_fo + HBaseRowPeriod ){
+      LOG.debug(baseTime + " | " + rowSeqs.get(i));
+      LOG.debug(baseTime + " >= " + startTime_fo + " AND " + baseTime + " < " + (startTime_fo + HBaseRowPeriod));
+      if (baseTime >= startTime_fo && baseTime < ( startTime_fo + HBaseRowPeriod ) ){
         return i;
       }
     }
     return -1;
   }
 
-  public Deferred<Object> storeCache(CacheFragment fragment, TreeMap<byte[], Span> spans){
+  public Deferred<Boolean> setMemcached(MemcachedClient client, HashMap<String, byte[]> item){
+    LOG.debug("setMemcached start");
+    if (client == null)
+      return Deferred.fromError(new Exception("MemcachedClient object is null"));
+    String key = item.entrySet().iterator().next().getKey();
+    byte[] value = item.entrySet().iterator().next().getValue();
+    OperationFuture<Boolean> future = client.set(key, memcachedExpiredTime, value);
+    try {
+      return Deferred.fromResult(future.get(memcachedVerifyingTime, TimeUnit.SECONDS));
+    }catch (Exception e){
+        return Deferred.fromError(new Exception("Failed to store value for key" + key + " : " + e.getMessage()));
+    }
+  }
+
+  public Deferred<Boolean> storeCache(CacheFragment fragment, TreeMap<byte[], Span> spans){
     // save to memached
     // find fragment order of start & end time
+    final ArrayList<Deferred<Boolean>> deferreds = new ArrayList<Deferred<Boolean>>();
+    MemcachedClient memcachedClientTmp = null;
+    try {
+      memcachedClientTmp = new MemcachedClient(new
+        InetSocketAddress(memcachedHost, memcachedPort));
+    }catch(IOException e){
+      return Deferred.fromError(e);
+    }
+    LOG.debug("Connected to memcached server");
+    final MemcachedClient memcachedClient = memcachedClientTmp;
 
     long startTime = fragment.getStartTime();
     long endTime = fragment.getEndTime();
@@ -124,17 +163,22 @@ public class Cache {
     ArrayList<RowSeq> restRowSeq = null;
     int spanCount = 0;
     for(Map.Entry<byte[], Span> entry : spans.entrySet()) {
+      LOG.debug("Span " + (spanCount + 1));
       // Group row key
       Span span = entry.getValue();  // ignore the key
       ArrayList<RowSeq> rowSeqs = span.getRows();
+      LOG.debug("get rowSeqs");
       int i;
       int start_rowSeq = 0;
       // First span only for defining starting fragment order
       if (spanCount == 0){
         start_rowSeq = findStartRowSeq(rowSeqs, startTime_fo);
         if (start_rowSeq < 0 ){
-          return Deferred.fromError(new Exception("Can't find starting rowSeq fragment order"));
+          String msg = "Can't find starting rowSeq fragment order";
+          LOG.error(msg);
+          return Deferred.fromError(new Exception(msg));
         }
+        LOG.debug("Finish findStartRowSeq");
       } else if (remainingRowSeq > 0 ){
         // This condition will happen on up to 2 spans only
         // if it remain some rowSeq in previous Span, merge `restRowSeq` and rowSeq of this Span
@@ -143,14 +187,15 @@ public class Cache {
         tmp.addAll(new ArrayList<RowSeq>(rowSeqs.subList( 0 , numRangeSize - remainingRowSeq)));
         start_rowSeq = numRangeSize - remainingRowSeq;
         HashMap<String, byte[]> item = serializeRowSeq(tmp);
-        // TODO: send `item` to cache
+        // send `item` to cache
+        deferreds.add(setMemcached(memcachedClient, item));
       }
-
 
       // TODO: bottleneck processing
       for(i = start_rowSeq; i< rowSeqs.size(); i+= numRangeSize) {
         HashMap<String, byte[]> item = serializeRowSeq(rowSeqs, i, numRangeSize);
-        // TODO: send `item` to cache
+        // send `item` to cache
+        deferreds.add(setMemcached(memcachedClient, item));
       }
       remainingRowSeq = i - rowSeqs.size();
       if (remainingRowSeq > 0 ){
@@ -162,8 +207,16 @@ public class Cache {
       spanCount ++;
     }
 
-    // TODO: update cacheIndexes
-    return null;
+    class UpdateCacheCB implements Callback<Boolean, ArrayList<Boolean>> {
+      @Override
+      public Boolean call(final ArrayList<Boolean> result) {
+        memcachedClient.shutdown();
+        // TODO: update cacheIndexes
+        LOG.debug("UpdateCacheCB");
+        return true;
+      }
+    }
+    return Deferred.group(deferreds).addCallback(new UpdateCacheCB());
   }
 
   // Example TreeMap
@@ -236,7 +289,7 @@ public class Cache {
   private HashMap<String, byte[]> serializeRowSeq(ArrayList<RowSeq> rowSeqs, int start, int length){
     //TODO: Optimize size of variables and speed
     // TODO: Now All Span is stored in one key *****
-
+    LOG.debug("serializeRowSeq start");
     // Assume that each span element is continuous data
     HashMap<String, byte[]> result = new HashMap<String, byte[]>();
     String key;

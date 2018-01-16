@@ -588,11 +588,12 @@ import net.opentsdb.utils.DateTime;
       @Override
       public ArrayList<TreeMap<byte[], Span>> call(final ArrayList<TreeMap<byte[], Span>> spans) {
 
-        final ArrayList<Deferred<Object>> deferreds = new ArrayList<Deferred<Object>>();
+        final ArrayList<Deferred<Boolean>> deferreds = new ArrayList<Deferred<Boolean>>();
 
         for (int i = 0; i < spans.size(); i++) {
           if (!cacheFragments.get(i).isInCache()) {  // true in cache
             // store in memcached
+            LOG.debug("starting store cache fragment");
             deferreds.add(tsdb.cache.storeCache(cacheFragments.get(i), spans.get(i)));
           }
         }
@@ -623,10 +624,10 @@ import net.opentsdb.utils.DateTime;
 
   @Override
   public Deferred<DataPoints[]> runAsync() throws HBaseException {
-//    return buildFragmentAsync(tsdb.cache.buildCacheFragments(this))
-//      .addCallback(new GroupByAndAggregateCB());
+    return buildFragmentAsync(tsdb.cache.buildCacheFragments(this))
+      .addCallback(new GroupByAndAggregateCB());
     // Without Cache
-    return findSpans().addCallback(new GroupByAndAggregateCB());
+//    return findSpans().addCallback(new GroupByAndAggregateCB());
   }
 
   /**
@@ -1014,6 +1015,8 @@ import net.opentsdb.utils.DateTime;
       for (Map.Entry<byte[], Span> entry : spans.entrySet()) {
         LOG.debug("Key: " + entry.getKey() + ". Value: " + entry.getValue());
      }
+
+     
 
       if (query_stats != null) {
         query_stats.addStat(query_index, QueryStat.QUERY_SCAN_TIME, 
