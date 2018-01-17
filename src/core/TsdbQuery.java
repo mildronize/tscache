@@ -612,7 +612,8 @@ import net.opentsdb.utils.DateTime;
 
     class ErrorCB implements Callback<Object, Exception> {
       public Object call(final Exception e) throws Exception {
-        return null;
+        throw new BadRequestException(HttpResponseStatus.BAD_REQUEST,
+          e.getMessage(), "Can't get data", e);
       }
     }
 

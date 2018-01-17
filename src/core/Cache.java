@@ -11,10 +11,7 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.net.InetSocketAddress;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.TreeMap;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -39,10 +36,11 @@ public class Cache {
   private int numRangeSize;
 
   // The period data of one row HBase ( default 1 hr (3600 second) )
-  private int HBaseRowPeriod = 3600;
+  private final long HBaseRowPeriod = 3600;
+  private final long HBaseRowPeriodMs = HBaseRowPeriod * 1000;
 
   // Default charset for byte-String conversion
-  private String charset = "US-ASCII";
+  private String charset = "ASCII";
 
   // Metadata size in byte
   private final short spanCount_numBytes = 2; // numBytes of number of Span
@@ -97,23 +95,23 @@ public class Cache {
   // storeCache helper functions //
   // -------------------------- //
 
-  private int startTimeToFragmentOrder(long time){
-    return (int)Math.ceil(time/(numRangeSize * HBaseRowPeriod));
+  public int startTimeToFragmentOrder(long time){
+    return (int)Math.ceil(time/(numRangeSize * HBaseRowPeriodMs));
   }
 
-  private int endTimeToFragmentOrder(long time){
-    return (int)Math.floor(time/(numRangeSize * HBaseRowPeriod));
+  public int endTimeToFragmentOrder(long time){
+    return (int)Math.floor(time/(numRangeSize * HBaseRowPeriodMs));
   }
 
-  private int findStartRowSeq(ArrayList<RowSeq> rowSeqs, long startTime_fo){
+  public int findStartRowSeq(ArrayList<RowSeq> rowSeqs, long startTime_fo){
     LOG.debug("start findStartRowSeq");
     LOG.debug(startTime_fo+"");
     int i;
     for ( i = 0; i < rowSeqs.size(); i++) {
       long baseTime = rowSeqs.get(i).baseTime();
       LOG.debug(baseTime + " | " + rowSeqs.get(i));
-      LOG.debug(baseTime + " >= " + startTime_fo + " AND " + baseTime + " < " + (startTime_fo + HBaseRowPeriod));
-      if (baseTime >= startTime_fo && baseTime < ( startTime_fo + HBaseRowPeriod ) ){
+      LOG.debug(baseTime + " >= " + startTime_fo + " AND " + baseTime + " < " + (startTime_fo + HBaseRowPeriod*numRangeSize));
+      if (baseTime >= startTime_fo && baseTime < ( startTime_fo + HBaseRowPeriod*numRangeSize ) ){
         return i;
       }
     }
@@ -122,15 +120,23 @@ public class Cache {
 
   public Deferred<Boolean> setMemcached(MemcachedClient client, HashMap<String, byte[]> item){
     LOG.debug("setMemcached start");
-    if (client == null)
-      return Deferred.fromError(new Exception("MemcachedClient object is null"));
+    if (client == null) {
+      String msg = "MemcachedClient object is null";
+      LOG.error(msg);
+      return Deferred.fromError(new Exception(msg));
+    }
+    LOG.debug("setMemcached client ready ");
     String key = item.entrySet().iterator().next().getKey();
     byte[] value = item.entrySet().iterator().next().getValue();
+    LOG.debug("setMemcached data: ("+ key +") | " + Arrays.toString(value));
     OperationFuture<Boolean> future = client.set(key, memcachedExpiredTime, value);
+    LOG.debug("setMemcached set!");
     try {
       return Deferred.fromResult(future.get(memcachedVerifyingTime, TimeUnit.SECONDS));
     }catch (Exception e){
-        return Deferred.fromError(new Exception("Failed to store value for key" + key + " : " + e.getMessage()));
+        String msg = "Failed to store value for key" + key + " : " + e.getMessage();
+        LOG.error(msg);
+        return Deferred.fromError(new Exception(msg));
     }
   }
 
@@ -154,10 +160,11 @@ public class Cache {
     int start_fo = startTimeToFragmentOrder(startTime);
     int end_fo = endTimeToFragmentOrder(endTime); // Not include end fragment order
 
-    long startTime_fo = start_fo * HBaseRowPeriod;
-    long endTime_fo = end_fo * HBaseRowPeriod;
+    long startTime_fo = start_fo * HBaseRowPeriod * numRangeSize;
+    long endTime_fo = end_fo * HBaseRowPeriod * numRangeSize;
     // a result (TreeMap<byte[], Span>) can be more than one
 
+    LOG.debug(start_fo + " " + end_fo + " " + startTime_fo);
     // The number of rest of RowSeq in previous Span
     int remainingRowSeq = 0;
     ArrayList<RowSeq> restRowSeq = null;
@@ -167,7 +174,7 @@ public class Cache {
       // Group row key
       Span span = entry.getValue();  // ignore the key
       ArrayList<RowSeq> rowSeqs = span.getRows();
-      LOG.debug("get rowSeqs");
+      LOG.debug("get rowSeqs size: " + rowSeqs.size());
       int i;
       int start_rowSeq = 0;
       // First span only for defining starting fragment order
@@ -178,6 +185,7 @@ public class Cache {
           LOG.error(msg);
           return Deferred.fromError(new Exception(msg));
         }
+        LOG.debug("start_rowSeq index: " + start_rowSeq);
         LOG.debug("Finish findStartRowSeq");
       } else if (remainingRowSeq > 0 ){
         // This condition will happen on up to 2 spans only
@@ -193,14 +201,24 @@ public class Cache {
 
       // TODO: bottleneck processing
       for(i = start_rowSeq; i< rowSeqs.size(); i+= numRangeSize) {
+        if (i + numRangeSize > rowSeqs.size())
+          break;
         HashMap<String, byte[]> item = serializeRowSeq(rowSeqs, i, numRangeSize);
+        LOG.debug("RowSeq index("+i+") : "+ item.entrySet().iterator().next().getKey());
         // send `item` to cache
         deferreds.add(setMemcached(memcachedClient, item));
       }
-      remainingRowSeq = i - rowSeqs.size();
+      remainingRowSeq = rowSeqs.size() - i;
+      LOG.debug("remainingRowSeq = "+remainingRowSeq);
       if (remainingRowSeq > 0 ){
         // copy the rest of this rowseq into `restRowSeq`
-        restRowSeq = new ArrayList<RowSeq>(rowSeqs.subList( i - numRangeSize , i - numRangeSize + remainingRowSeq));
+        try {
+          LOG.debug(rowSeqs.size() + " " + (i - numRangeSize) + " " + (i - numRangeSize + remainingRowSeq));
+          restRowSeq = new ArrayList<RowSeq>(rowSeqs.subList(i - numRangeSize, i - numRangeSize + remainingRowSeq));
+
+        }catch (IndexOutOfBoundsException e){
+          return Deferred.fromError(e);
+        }
       }
       // No need to define ending fragment order
       // In the Last Span if `remainingRowSeq` > 0 means we leave the rest!
@@ -227,12 +245,6 @@ public class Cache {
 //    RowSeq([0, 0, 1, 86, -123, 95, 16, 0, 0, 1, 0, 0, 1] (metric=level), base_time=1451581200 (Fri Jan 01 00:00:00 ICT 2016)(datapoints=1), (qualifier=[[0, 0]]), (values=[[32]]),
 //   ]
 
-  private String bytesToString(byte[] bytes) throws UnsupportedEncodingException{
-    return new String(bytes, charset);
-  }
-  private byte[] stringToBytes(String string) throws UnsupportedEncodingException{
-    return string.getBytes(charset);
-  }
 
   // -------------------------- //
   // Serialize helper functions //
@@ -294,13 +306,10 @@ public class Cache {
     HashMap<String, byte[]> result = new HashMap<String, byte[]>();
     String key;
     // Get first key of the span
+    // Convert byte[] key into Base64 Encoding
     try {
-      key = bytesToString(rowSeqs.get(0).getKey());
+      key = Base64.getEncoder().encodeToString(rowSeqs.get(start).getKey());
     }catch (IndexOutOfBoundsException e) {
-      // TODO: use errorback to handle exception
-      LOG.error(e.getMessage());
-      return null;
-    } catch(UnsupportedEncodingException e){
       // TODO: use errorback to handle exception
       LOG.error(e.getMessage());
       return null;
