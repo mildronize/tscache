@@ -37,7 +37,7 @@ public class CacheLookupTable {
     return fragmentOrder % indexSize;
   }
 
-  public void mark(int start_fragmentOrder, int numFragment){
+  public void mark(int start_fragmentOrder, int numFragment) throws IndexOutOfBoundsException{
     // bit 1 in cache
     // bit 0 not in cache
 
@@ -62,16 +62,27 @@ public class CacheLookupTable {
     // Mark All 1 value of each bit into target position
     // 1. Make head block ( not fullfill)
     // 36 = 100 % 64
-    int offset = start_fragmentOrder % indexSize;
-
+    int offset_head = start_fragmentOrder % indexSize;
+    cacheIndexes.set(incomingBlockOrder, cacheIndexes.get(incomingBlockOrder).longValue() |
+                                          headPartialMarkedBlock(offset_head).longValue());
     // 2. Make body block with all 1 value
+    for (int i = incomingBlockOrder + 1 ; i < incomingEndBlockOrder; i++){
+      cacheIndexes.set(i, fulfillBlock());
+    }
     // 3. Make tail block ( not fullfill)
-
-
+    int numberMarkedBits = end_fragmentOrder % indexSize;
+    int offset_tail = indexSize - numberMarkedBits;
+    if(numberMarkedBits != 0)
+      cacheIndexes.set(incomingBlockOrder, cacheIndexes.get(incomingBlockOrder).longValue() |
+        tailPartialMarkedBlock(offset_tail).longValue());
   }
 
   private Long emptyBlock(){
-    return new Long(0b0000000000000000000000000000000000000000000000000000000000000000L);
+    return new Long(0L);
+  }
+
+  private Long fulfillBlock(){
+    return new Long(-1L);
   }
 
   private Long headPartialMarkedBlock(int offset){

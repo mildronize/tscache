@@ -155,8 +155,8 @@ public class Cache {
     long startTime = fragment.getStartTime();
     long endTime = fragment.getEndTime();
 
-    int start_fo = startTimeToFragmentOrder(startTime);
-    int end_fo = endTimeToFragmentOrder(endTime); // Not include end fragment order
+    final int start_fo = startTimeToFragmentOrder(startTime);
+    final int end_fo = endTimeToFragmentOrder(endTime); // Not include end fragment order
 
     long startTime_fo = start_fo * HBaseRowPeriod * numRangeSize;
     long endTime_fo = end_fo * HBaseRowPeriod * numRangeSize;
