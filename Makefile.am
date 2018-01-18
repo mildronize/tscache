@@ -39,6 +39,7 @@ tsdb_SRC := \
 	src/core/ByteBufferList.java	\
   src/core/Cache.java	\
   src/core/CacheFragment.java	\
+  src/core/CacheLookupTable.java	\
 	src/core/ColumnDatapointIterator.java	\
 	src/core/CompactionQueue.java	\
 	src/core/Const.java	\

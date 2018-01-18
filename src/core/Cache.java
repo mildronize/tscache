@@ -24,11 +24,9 @@ public class Cache {
 
   private static final Logger LOG = LoggerFactory.getLogger(Cache.class);
 
-  // May be byte data structure for looking fast
-  private ArrayList<long[]> cacheIndexes = null;
+  CacheLookupTable lookupTable = null;
 
-  // Fragment Order = Ceil(Ti/range size)
-  private int startFragmentOrder;
+  // Cache parameter
 
   private TSDB tsdb;
 
@@ -60,15 +58,14 @@ public class Cache {
     LOG.debug("Create Cache object");
     this.tsdb = tsdb;
     this.numRangeSize = 4;
+    lookupTable = new CacheLookupTable();
   }
-
-
 
   public ArrayList<CacheFragment> buildCacheFragments(TsdbQuery tsdbQuery){
     ArrayList<CacheFragment> cacheFragments = new ArrayList<CacheFragment>();
 
     // First miss
-    if(isCacheIndexesEmpty()) {
+    if(lookupTable.isEmpty()) {
       CacheFragment cacheFragment = new CacheFragment(tsdbQuery.getStartTime(), tsdbQuery.getEndTime(), false);
       cacheFragments.add(cacheFragment);
     }else {
@@ -139,6 +136,7 @@ public class Cache {
         return Deferred.fromError(new Exception(msg));
     }
   }
+
 
   public Deferred<Boolean> storeCache(CacheFragment fragment, TreeMap<byte[], Span> spans){
     // save to memached
@@ -230,6 +228,7 @@ public class Cache {
       public Boolean call(final ArrayList<Boolean> result) {
         memcachedClient.shutdown();
         // TODO: update cacheIndexes
+        lookupTable.mark(start_fo, result.size());
         LOG.debug("UpdateCacheCB");
         return true;
       }
@@ -391,9 +390,4 @@ public class Cache {
     return span;
   }
 
-  private boolean isCacheIndexesEmpty(){
-    if ( cacheIndexes == null ) return true;
-    if ( cacheIndexes.size() == 0) return true;
-    return false;
-  }
 }
