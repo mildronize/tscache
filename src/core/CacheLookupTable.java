@@ -9,22 +9,38 @@ public class CacheLookupTable {
 
   private static final Logger LOG = LoggerFactory.getLogger(CacheLookupTable.class);
 
+  public ArrayList<Long> getCacheIndexes() {
+    return cacheIndexes;
+  }
+
+  public void setCacheIndexes(ArrayList<Long> cacheIndexes) {
+    this.cacheIndexes = cacheIndexes;
+  }
+
   // May be byte data structure for looking fast
   private ArrayList<Long> cacheIndexes= null;
 
-  // Number of bit per cacheIndex, Maximum: 64 (Size of long)
-  private final int indexSize = 64;
+  // Number of bit per cacheIndex, Maximum: 64 (Size of long) default 64
+  private int indexSize;
 
-  // Fragment Order = Ceil(Ti/range size)
-  private int startFragmentOrder;
-
+//  // Fragment Order = Ceil(Ti/range size)
+//  private int startFragmentOrderBlock;
+//
   private int blockOrder;
 
   public CacheLookupTable(){
-    cacheIndexes = new ArrayList<Long>();
-    cacheIndexes.add(emptyBlock());
-    startFragmentOrder = 0;
-    blockOrder = 0;
+    this.indexSize = 64;
+    init();
+  }
+
+  public CacheLookupTable(int indexSize){
+    this.indexSize = indexSize;
+    init();
+  }
+
+  private void init(){
+    ArrayList<Long> tmp = new ArrayList<Long>();
+    setCacheIndexes(tmp);
   }
 
   public boolean isEmpty(){
@@ -33,55 +49,62 @@ public class CacheLookupTable {
     return false;
   }
 
-  public int findOrder(int fragmentOrder){
-    return fragmentOrder % indexSize;
+  public int calcNumberEmptyBlock(int cacheIndexesSize, int incomingEndBlockOrder){
+    int numberEmptyBlock = 0;
+    if(cacheIndexesSize <= incomingEndBlockOrder){
+      numberEmptyBlock = incomingEndBlockOrder - cacheIndexesSize + 1;
+    }
+    return numberEmptyBlock;
   }
 
-  public void mark(int start_fragmentOrder, int numFragment) throws IndexOutOfBoundsException{
-    // bit 1 in cache
-    // bit 0 not in cache
-
-    //    0       1          2          3          4
-    // 0 - 63, 64 - 127, 128 - 191 , 192 - 255, 256 - 319
-    // 300 = 100 + 200
-    int end_fragmentOrder = start_fragmentOrder + numFragment;
-    // 4 = 300%64
+  public int calcNumberMarkedBit(int start_fragmentOrder, int numFragment){
+    int end_fragmentOrder = start_fragmentOrder + numFragment - 1;
     int incomingEndBlockOrder = (int)(end_fragmentOrder / indexSize);
-    // 1 = 100 % 64
     int incomingBlockOrder = (int)(start_fragmentOrder / indexSize);
-    // Insert empty blocks before and after existing cacheIndexes
-    // insert empty blocks before cacheIndexs
-    for (int i = 0; i < blockOrder - incomingBlockOrder; i++){
-      cacheIndexes.add(0, emptyBlock());
-      blockOrder--;
+
+    if (incomingBlockOrder == incomingEndBlockOrder){
+      return numFragment;
+    }else {
+      return end_fragmentOrder % indexSize + 1;
     }
-    // Append empty blocks of cacheIndexs
-    for (int i = 0; i < incomingEndBlockOrder - blockOrder + cacheIndexes.size(); i++){
+  }
+
+  public void mark(int start_fragmentOrder, int numFragment) throws IndexOutOfBoundsException {
+    int end_fragmentOrder = start_fragmentOrder + numFragment - 1;
+    int incomingEndBlockOrder = (int)(end_fragmentOrder / indexSize);
+    int incomingBlockOrder = (int)(start_fragmentOrder / indexSize);
+
+    int numberEmptyBlock = calcNumberEmptyBlock(cacheIndexes.size(), incomingEndBlockOrder);
+    for (int i = 0; i < numberEmptyBlock; i++) {
       cacheIndexes.add(emptyBlock());
     }
-    // Mark All 1 value of each bit into target position
-    // 1. Make head block ( not fullfill)
-    // 36 = 100 % 64
+
     int offset_head = start_fragmentOrder % indexSize;
-    cacheIndexes.set(incomingBlockOrder, cacheIndexes.get(incomingBlockOrder).longValue() |
-                                          headPartialMarkedBlock(offset_head).longValue());
+    if(offset_head + numFragment > indexSize)
+      cacheIndexes.set(incomingBlockOrder, cacheIndexes.get(incomingBlockOrder).longValue() |
+        headPartialMarkedBlock(offset_head).longValue());
     // 2. Make body block with all 1 value
     for (int i = incomingBlockOrder + 1 ; i < incomingEndBlockOrder; i++){
       cacheIndexes.set(i, fulfillBlock());
     }
     // 3. Make tail block ( not fullfill)
-    int numberMarkedBits = end_fragmentOrder % indexSize;
-    int offset_tail = indexSize - numberMarkedBits;
+    if (incomingBlockOrder != incomingEndBlockOrder){
+      // One block incoming
+      offset_head = 0;
+    }
+    int numberMarkedBits = calcNumberMarkedBit(start_fragmentOrder, numFragment);
+    int offset_tail = indexSize - numberMarkedBits - offset_head;
     if(numberMarkedBits != 0)
-      cacheIndexes.set(incomingBlockOrder, cacheIndexes.get(incomingBlockOrder).longValue() |
-        tailPartialMarkedBlock(offset_tail).longValue());
+      cacheIndexes.set(incomingEndBlockOrder, cacheIndexes.get(incomingEndBlockOrder).longValue() |
+        tailPartialMarkedBlock(offset_tail, offset_head).longValue());
   }
 
-  private Long emptyBlock(){
+
+  public Long emptyBlock(){
     return new Long(0L);
   }
 
-  private Long fulfillBlock(){
+  public Long fulfillBlock(){
     return new Long(-1L);
   }
 
@@ -95,14 +118,17 @@ public class CacheLookupTable {
     return new Long(block);
   }
 
-  private Long tailPartialMarkedBlock(int offset){
+  public Long tailPartialMarkedBlock(int offset_tail, int offset_head){
     long block = 0;
-    int number = indexSize - offset;
+    int number = indexSize - offset_tail - offset_head;
+    for (int i=0;i < offset_head  ;i++) {
+      block = (block << 1);
+    }
     for (int i=0;i < number  ;i++) {
       block = (block << 1) | 1;
     }
     // append zero
-    block = (block << offset);
+    block = (block << offset_tail);
     return new Long(block);
   }
 

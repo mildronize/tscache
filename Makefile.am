@@ -251,6 +251,8 @@ test_SRC := \
 	test/core/TestAggregators.java \
 	test/core/TestAppendDataPoints.java \
 	test/core/TestBatchedDataPoints.java \
+	tests/core/TestCache.java \
+	tests/core/TestCacheLookupTable.java \
 	test/core/TestCompactionQueue.java	\
 	test/core/TestDownsampler.java \
 	test/core/TestDownsamplingSpecification.java \
