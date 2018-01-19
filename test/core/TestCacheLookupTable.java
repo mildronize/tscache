@@ -39,11 +39,12 @@ public class TestCacheLookupTable {
     assertEquals(64, lookupTable.calcNumberMarkedBit(1, 127));
     assertEquals(1, lookupTable.calcNumberMarkedBit(1, 128));
 
-    assertEquals(1, lookupTable.calcNumberMarkedBit(127, 1));
-    assertEquals(8, lookupTable.calcNumberMarkedBit(66, 70));
+    assertEquals(2, lookupTable.calcNumberMarkedBit(64, 2));
+    assertEquals(64, lookupTable.calcNumberMarkedBit(64, 64));
     assertEquals(1, lookupTable.calcNumberMarkedBit(65, 64));
     assertEquals(2, lookupTable.calcNumberMarkedBit(65, 2));
-
+    assertEquals(8, lookupTable.calcNumberMarkedBit(66, 70));
+    assertEquals(1, lookupTable.calcNumberMarkedBit(127, 1));
   }
 
 
