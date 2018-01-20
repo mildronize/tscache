@@ -61,18 +61,63 @@ public class Cache {
     lookupTable = new CacheLookupTable();
   }
 
-  public ArrayList<CacheFragment> buildCacheFragments(TsdbQuery tsdbQuery){
-    ArrayList<CacheFragment> cacheFragments = new ArrayList<CacheFragment>();
+  public boolean getBitBoolean(long num, int position) {
+    // Please use with reverse order
+    if ( ((num >> position) & 1) == 1) return true;
+    return false;
+  }
 
+  public ArrayList<CacheFragment> buildFragmentsFromBits(ArrayList<Long> results, int startFragmentOrder, int endFragmentOrder, int indexSize){
+    int startQueryBlockOrder = lookupTable.calcBlockOrder(startFragmentOrder);
+    ArrayList<CacheFragment> fragments = new ArrayList<CacheFragment>();
+    boolean currentCachedState = true; // true means in cache;
+    long startTime_cacheFragment = 0;
+    long endTime_cacheFragment = 0;
+    for(int i = 0; i < results.size(); i++){
+      // first block only
+      int startFOBlock = indexSize - 1;
+      if( i == 0){
+        // First CacheFragment create here
+        startFOBlock = indexSize - ( startFragmentOrder % indexSize ) - 1;
+        startTime_cacheFragment = fragmentOrderToStartTime(startFragmentOrder);
+      }
+
+      for(int j = startFOBlock; j >= 0 ; j++ ){
+        if(getBitBoolean(results.get(i).longValue(), j)){
+          // Not in cache
+
+        }
+
+        // if end of current fragment ( 1 to 0 or 0 to 1 (toggle state ))
+        // stamp end time in endTime_cacheFragment
+        //endTime_cacheFragment = fragmentOrderToEndTime(currentFO);
+        fragments.add(new CacheFragment(startTime_cacheFragment, endTime_cacheFragment, currentCachedState));
+        currentCachedState = !currentCachedState; // swap state
+      }
+    }
+
+    return fragments;
+  }
+
+  public ArrayList<CacheFragment> buildCacheFragments(TsdbQuery tsdbQuery){
+    // Decision
+    ArrayList<CacheFragment> cacheFragments;
     // First miss
     if(lookupTable.isEmpty()) {
+      cacheFragments = new ArrayList<CacheFragment>();
       CacheFragment cacheFragment = new CacheFragment(tsdbQuery.getStartTime(), tsdbQuery.getEndTime(), false);
       cacheFragments.add(cacheFragment);
     }else {
+      // XOR operation for finding which part in cache or not?
+      int start_fo = startTimeToFragmentOrder(tsdbQuery.getStartTime());
+      int end_fo = endTimeToFragmentOrder(tsdbQuery.getEndTime());
 
+      // Build body
+      ArrayList<Long> results = lookupTable.buildFragmentBits(start_fo, end_fo);
+      cacheFragments = buildFragmentsFromBits(results, start_fo, end_fo, lookupTable.getIndexSize());
+      // Todo: add head if exist
+      // Todo: add tail if exist
     }
-    // XOR operation for finding which part in cache or not?
-
     return cacheFragments;
   }
 
@@ -96,8 +141,16 @@ public class Cache {
     return (int)Math.ceil(time/(numRangeSize * HBaseRowPeriodMs));
   }
 
+  public long fragmentOrderToStartTime(int fragmentOrder){
+    return fragmentOrder * numRangeSize * HBaseRowPeriodMs;
+  }
+
   public int endTimeToFragmentOrder(long time){
     return (int)Math.floor(time/(numRangeSize * HBaseRowPeriodMs));
+  }
+
+  public long fragmentOrderToEndTime(int fragmentOrder){
+    return (fragmentOrder + 1 ) * numRangeSize * HBaseRowPeriodMs;
   }
 
   public int findStartRowSeq(ArrayList<RowSeq> rowSeqs, long startTime_fo){
@@ -165,6 +218,8 @@ public class Cache {
     LOG.debug(start_fo + " " + end_fo + " " + startTime_fo);
     // The number of rest of RowSeq in previous Span
     int remainingRowSeq = 0;
+
+    HashMap<String, byte[]> item;
     ArrayList<RowSeq> restRowSeq = null;
     int spanCount = 0;
     for(Map.Entry<byte[], Span> entry : spans.entrySet()) {
@@ -192,7 +247,12 @@ public class Cache {
         tmp.addAll(restRowSeq);
         tmp.addAll(new ArrayList<RowSeq>(rowSeqs.subList( 0 , numRangeSize - remainingRowSeq)));
         start_rowSeq = numRangeSize - remainingRowSeq;
-        HashMap<String, byte[]> item = serializeRowSeq(tmp);
+        try {
+          item = serializeRowSeq(tmp);
+        }catch (Exception e){
+          LOG.error(e.getMessage());
+          return Deferred.fromError(e);
+        }
         // send `item` to cache
         deferreds.add(setMemcached(memcachedClient, item));
       }
@@ -201,7 +261,12 @@ public class Cache {
       for(i = start_rowSeq; i< rowSeqs.size(); i+= numRangeSize) {
         if (i + numRangeSize > rowSeqs.size())
           break;
-        HashMap<String, byte[]> item = serializeRowSeq(rowSeqs, i, numRangeSize);
+        try {
+          item = serializeRowSeq(rowSeqs, i, numRangeSize);
+        }catch (Exception e){
+          LOG.error(e.getMessage());
+          return Deferred.fromError(e);
+        }
         LOG.debug("RowSeq index("+i+") : "+ item.entrySet().iterator().next().getKey());
         // send `item` to cache
         deferreds.add(setMemcached(memcachedClient, item));
@@ -213,7 +278,6 @@ public class Cache {
         try {
           LOG.debug(rowSeqs.size() + " " + (i - numRangeSize) + " " + (i - numRangeSize + remainingRowSeq));
           restRowSeq = new ArrayList<RowSeq>(rowSeqs.subList(i - numRangeSize, i - numRangeSize + remainingRowSeq));
-
         }catch (IndexOutOfBoundsException e){
           return Deferred.fromError(e);
         }
@@ -291,13 +355,13 @@ public class Cache {
   }
 
   // group all of RowSeq into a key ( in cache )
-  private HashMap<String, byte[]> serializeRowSeq(ArrayList<RowSeq> rowSeqs){
+  private HashMap<String, byte[]> serializeRowSeq(ArrayList<RowSeq> rowSeqs) throws Exception{
     return serializeRowSeq(rowSeqs, 0, rowSeqs.size());
   }
 
   // Convert TreeMap<Byte[], Span> (Raw data from hbase) into a pair of key and value, for storing in memcached
   // group all of RowSeq into a key ( in cache ) in range
-  private HashMap<String, byte[]> serializeRowSeq(ArrayList<RowSeq> rowSeqs, int start, int length){
+  private HashMap<String, byte[]> serializeRowSeq(ArrayList<RowSeq> rowSeqs, int start, int length) throws Exception{
     //TODO: Optimize size of variables and speed
     // TODO: Now All Span is stored in one key *****
     LOG.debug("serializeRowSeq start");
@@ -306,13 +370,7 @@ public class Cache {
     String key;
     // Get first key of the span
     // Convert byte[] key into Base64 Encoding
-    try {
-      key = Base64.getEncoder().encodeToString(rowSeqs.get(start).getKey());
-    }catch (IndexOutOfBoundsException e) {
-      // TODO: use errorback to handle exception
-      LOG.error(e.getMessage());
-      return null;
-    }
+    key = Base64.getEncoder().encodeToString(rowSeqs.get(start).getKey());
     // Perform value
     ArrayList<byte[]> tmpValues = new ArrayList<byte[]>();
     // Add Number of Span

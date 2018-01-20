@@ -20,6 +20,10 @@ public class CacheLookupTable {
   // May be byte data structure for looking fast
   private ArrayList<Long> cacheIndexes= null;
 
+  public int getIndexSize() {
+    return indexSize;
+  }
+
   // Number of bit per cacheIndex, Maximum: 64 (Size of long) default 64
   private int indexSize;
 
@@ -49,6 +53,10 @@ public class CacheLookupTable {
     return false;
   }
 
+  public int calcBlockOrder(int fragmentOrder){
+    return (int)(fragmentOrder / indexSize);
+  }
+
   public int calcNumberEmptyBlock(int cacheIndexesSize, int incomingEndBlockOrder){
     int numberEmptyBlock = 0;
     if(cacheIndexesSize <= incomingEndBlockOrder){
@@ -59,9 +67,8 @@ public class CacheLookupTable {
 
   public int calcNumberMarkedBit(int start_fragmentOrder, int numFragment){
     int end_fragmentOrder = start_fragmentOrder + numFragment - 1;
-    int incomingEndBlockOrder = (int)(end_fragmentOrder / indexSize);
-    int incomingBlockOrder = (int)(start_fragmentOrder / indexSize);
-
+    int incomingEndBlockOrder = calcBlockOrder(end_fragmentOrder);
+    int incomingBlockOrder = calcBlockOrder(start_fragmentOrder);
     if (incomingBlockOrder == incomingEndBlockOrder){
       return numFragment;
     }else {
@@ -71,8 +78,8 @@ public class CacheLookupTable {
 
   public void mark(int start_fragmentOrder, int numFragment) throws IndexOutOfBoundsException {
     int end_fragmentOrder = start_fragmentOrder + numFragment - 1;
-    int incomingEndBlockOrder = (int)(end_fragmentOrder / indexSize);
-    int incomingBlockOrder = (int)(start_fragmentOrder / indexSize);
+    int incomingEndBlockOrder = calcBlockOrder(end_fragmentOrder);
+    int incomingBlockOrder = calcBlockOrder(start_fragmentOrder);
 
     int numberEmptyBlock = calcNumberEmptyBlock(cacheIndexes.size(), incomingEndBlockOrder);
     for (int i = 0; i < numberEmptyBlock; i++) {
@@ -98,7 +105,6 @@ public class CacheLookupTable {
       cacheIndexes.set(incomingEndBlockOrder, cacheIndexes.get(incomingEndBlockOrder).longValue() |
         tailPartialMarkedBlock(offset_tail, offset_head).longValue());
   }
-
 
   public Long emptyBlock(){
     return new Long(0L);
@@ -130,6 +136,49 @@ public class CacheLookupTable {
     // append zero
     block = (block << offset_tail);
     return new Long(block);
+  }
+
+  // Find and create fragments section
+  // ---------------------------------
+  public ArrayList<Long> convertToQueryIndexes(int startFragmentOrder, int endFragmentOrder){
+    ArrayList<Long> queryIndexes = new ArrayList<Long>();
+
+    return queryIndexes;
+  }
+
+  public ArrayList<Long> findCachedBits(ArrayList<Long> queryIndexes, int startQueryBlockOrder, int endQueryBlockOrder){
+    ArrayList<Long> result = new ArrayList<Long>();
+    for (int i = startQueryBlockOrder ; i <= endQueryBlockOrder; i++ ){
+      result.add(new Long(
+        queryIndexes.get(i - startQueryBlockOrder).longValue()
+          ^ cacheIndexes.get(i).longValue()
+        ));
+    }
+    return result;
+  }
+
+  public ArrayList<Long> buildFragmentBits(int startFragmentOrder, int endFragmentOrder) {
+//    ArrayList<CacheFragment> fragments = new ArrayList<CacheFragment>();
+    ArrayList<Long> queryIndexes = convertToQueryIndexes(startFragmentOrder, endFragmentOrder);
+    int startQueryBlockOrder = calcBlockOrder(startFragmentOrder);
+    int endQueryBlockOrder = calcBlockOrder(endFragmentOrder);
+    ArrayList<Long> result;
+    // If length of queryIndexes > length of cacheIndexes; XOR until the end of cacheIndexes, otherwise return all 1 bits;
+    int numNotInCacheBlock = queryIndexes.size() + startQueryBlockOrder - cacheIndexes.size();
+    if (numNotInCacheBlock > 0)
+      result = findCachedBits(queryIndexes, startQueryBlockOrder, cacheIndexes.size() - 1);
+    else
+      result = findCachedBits(queryIndexes, startQueryBlockOrder, endQueryBlockOrder);
+    // Fill with all 1 bits; means not in cache
+    for(int i = 0 ; i < numNotInCacheBlock; i++){
+      result.add(fulfillBlock());
+    }
+    return result;
+//    // build body
+//    fragments = buildFragmentsFromBits(result, startQueryBlockOrder, startFragmentOrder, endFragmentOrder);
+//    // Todo: add head if exist
+//    // Todo: add tail if exist
+//    return fragments;
   }
 
 }
