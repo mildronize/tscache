@@ -69,32 +69,44 @@ public class Cache {
 
   public ArrayList<CacheFragment> buildFragmentsFromBits(ArrayList<Long> results, int startFragmentOrder, int endFragmentOrder, int indexSize){
     int startQueryBlockOrder = lookupTable.calcBlockOrder(startFragmentOrder);
+    int endQueryBlockOrder = lookupTable.calcBlockOrder(endFragmentOrder);
     ArrayList<CacheFragment> fragments = new ArrayList<CacheFragment>();
     boolean currentCachedState = true; // true means in cache;
+    boolean previousBit = true;
+    boolean currentBit = true;
     long startTime_cacheFragment = 0;
     long endTime_cacheFragment = 0;
-    for(int i = 0; i < results.size(); i++){
-      // first block only
-      int startFOBlock = indexSize - 1;
-      if( i == 0){
-        // First CacheFragment create here
-        startFOBlock = indexSize - ( startFragmentOrder % indexSize ) - 1;
-        startTime_cacheFragment = fragmentOrderToStartTime(startFragmentOrder);
-      }
+    int startFOBlock = 0;
+
+    // First block only
+    // -------------------------------------------------------------------------------
+    // First CacheFragment create here
+    startFOBlock = indexSize - ( ( startFragmentOrder + 1 )% indexSize ) - 1;
+    startTime_cacheFragment = fragmentOrderToStartTime(startFragmentOrder);
+    previousBit = getBitBoolean(results.get(0).longValue(), startFOBlock);
+
+    for(int i = 1; i < results.size() - 1; i++){
+      startFOBlock = indexSize - 1;
 
       for(int j = startFOBlock; j >= 0 ; j++ ){
-        if(getBitBoolean(results.get(i).longValue(), j)){
-          // Not in cache
-
+        currentBit = getBitBoolean(results.get(i).longValue(), j);
+        // toggle state
+        if(currentBit != previousBit){
+          int currentFO = 0; // TODO
+          endTime_cacheFragment = fragmentOrderToEndTime(currentFO);
+          fragments.add(new CacheFragment(startTime_cacheFragment, endTime_cacheFragment, currentCachedState));
+          currentCachedState = !currentCachedState; // swap state
         }
-
         // if end of current fragment ( 1 to 0 or 0 to 1 (toggle state ))
-        // stamp end time in endTime_cacheFragment
-        //endTime_cacheFragment = fragmentOrderToEndTime(currentFO);
-        fragments.add(new CacheFragment(startTime_cacheFragment, endTime_cacheFragment, currentCachedState));
-        currentCachedState = !currentCachedState; // swap state
       }
     }
+
+    // Last block only
+    // -------------------------------------------------------------------------------
+    // Last CacheFragment create here
+    startFOBlock = indexSize - ( ( startFragmentOrder + 1 )% indexSize ) - 1;
+    startTime_cacheFragment = fragmentOrderToStartTime(startFragmentOrder);
+    previousBit = getBitBoolean(results.get(0).longValue(), startFOBlock);
 
     return fragments;
   }

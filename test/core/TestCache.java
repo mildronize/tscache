@@ -16,10 +16,10 @@ public final class TestCache extends BaseTsdbTest {
 
     //private TsdbQuery query = null;
 
-    @Before
-    public void beforeLocal() throws Exception {
-      //query = new TsdbQuery(tsdb);
-    }
+  @Before
+  public void beforeLocal() throws Exception {
+    //query = new TsdbQuery(tsdb);
+  }
 
   @Test
   public void test_findStartRowSeq() {
@@ -30,6 +30,5 @@ public final class TestCache extends BaseTsdbTest {
   public void startTimeToFragmentOrder(){
     assertEquals(tsdb.cache.startTimeToFragmentOrder(3000), 0);
   }
-
 
 }
