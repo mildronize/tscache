@@ -61,19 +61,29 @@ public class Cache {
     lookupTable = new CacheLookupTable();
   }
 
-  public boolean getBitBoolean(long num, int position) {
-    // Please use with reverse order
-    if ( ((num >> position) & 1) == 1) return true;
+  public Cache(TSDB tsdb, int numRangeSize) {
+    LOG.debug("Create Cache object");
+    this.tsdb = tsdb;
+    this.numRangeSize = numRangeSize;
+    lookupTable = new CacheLookupTable();
+  }
+
+  public boolean getBitBoolean(long num, int position, int maxNumBits) throws Exception{
+    // maxNumBits: max is 64
+    // number of bit `num` should = maxNumBits
+    if(Long.bitCount(num) > maxNumBits)
+      throw new Exception("Number of bits is larger than maxNumBits!");
+    if ( ((num >> ( maxNumBits - position - 1 ) ) & 1) == 1) return true;
     return false;
   }
 
-  public ArrayList<CacheFragment> buildFragmentsFromBits(ArrayList<Long> results, int startFragmentOrder, int endFragmentOrder, int indexSize){
+  public ArrayList<CacheFragment> buildFragmentsFromBits(ArrayList<Long> results, int startFragmentOrder, int endFragmentOrder, int indexSize) throws Exception{
     int startQueryBlockOrder = lookupTable.calcBlockOrder(startFragmentOrder);
     int endQueryBlockOrder = lookupTable.calcBlockOrder(endFragmentOrder);
     ArrayList<CacheFragment> fragments = new ArrayList<CacheFragment>();
-    boolean currentCachedState = true; // true means in cache;
-    boolean previousBit = true;
-    boolean currentBit = true;
+    boolean currentCachedState; // true means in cache;
+    boolean previousBit; // 0 or false means in cache;
+    boolean currentBit; // 0 or false means in cache;
     long startTime_cacheFragment = 0;
     long endTime_cacheFragment = 0;
     int startFOBlock = 0;
@@ -81,32 +91,33 @@ public class Cache {
     // First block only
     // -------------------------------------------------------------------------------
     // First CacheFragment create here
-    startFOBlock = indexSize - ( ( startFragmentOrder + 1 )% indexSize ) - 1;
+    startFOBlock = startFragmentOrder % indexSize;
     startTime_cacheFragment = fragmentOrderToStartTime(startFragmentOrder);
-    previousBit = getBitBoolean(results.get(0).longValue(), startFOBlock);
+    previousBit = getBitBoolean(results.get(0).longValue(), startFOBlock, indexSize);
+    currentCachedState = !previousBit;
 
+    // body blocks
+    // -------------------------------------------------------------------------------
     for(int i = 1; i < results.size() - 1; i++){
-      startFOBlock = indexSize - 1;
 
-      for(int j = startFOBlock; j >= 0 ; j++ ){
-        currentBit = getBitBoolean(results.get(i).longValue(), j);
+      for(int j = 0; j < indexSize ; j++ ){
+        currentBit = getBitBoolean(results.get(i).longValue(), j, indexSize);
         // toggle state
         if(currentBit != previousBit){
           int currentFO = 0; // TODO
           endTime_cacheFragment = fragmentOrderToEndTime(currentFO);
           fragments.add(new CacheFragment(startTime_cacheFragment, endTime_cacheFragment, currentCachedState));
-          currentCachedState = !currentCachedState; // swap state
+          currentCachedState = !currentCachedState; // toggle state
+          startTime_cacheFragment = fragmentOrderToEndTime(currentFO + 1); // next Fragment order
         }
-        // if end of current fragment ( 1 to 0 or 0 to 1 (toggle state ))
       }
     }
 
     // Last block only
     // -------------------------------------------------------------------------------
     // Last CacheFragment create here
-    startFOBlock = indexSize - ( ( startFragmentOrder + 1 )% indexSize ) - 1;
-    startTime_cacheFragment = fragmentOrderToStartTime(startFragmentOrder);
-    previousBit = getBitBoolean(results.get(0).longValue(), startFOBlock);
+    endTime_cacheFragment = fragmentOrderToEndTime(endFragmentOrder);
+    fragments.add(new CacheFragment(startTime_cacheFragment, endTime_cacheFragment, currentCachedState));
 
     return fragments;
   }
@@ -126,7 +137,13 @@ public class Cache {
 
       // Build body
       ArrayList<Long> results = lookupTable.buildFragmentBits(start_fo, end_fo);
-      cacheFragments = buildFragmentsFromBits(results, start_fo, end_fo, lookupTable.getIndexSize());
+      try {
+        cacheFragments = buildFragmentsFromBits(results, start_fo, end_fo, lookupTable.getIndexSize());
+      }catch(Exception e){
+        LOG.error(e.getMessage());
+        return null;
+      }
+
       // Todo: add head if exist
       // Todo: add tail if exist
     }
@@ -150,7 +167,7 @@ public class Cache {
   // -------------------------- //
 
   public int startTimeToFragmentOrder(long time){
-    return (int)Math.ceil(time/(numRangeSize * HBaseRowPeriodMs));
+    return (int)Math.ceil((double)time/(numRangeSize * HBaseRowPeriodMs));
   }
 
   public long fragmentOrderToStartTime(int fragmentOrder){
@@ -158,7 +175,8 @@ public class Cache {
   }
 
   public int endTimeToFragmentOrder(long time){
-    return (int)Math.floor(time/(numRangeSize * HBaseRowPeriodMs));
+    // return < 0 means no fo, no need to cache
+    return (int)Math.floor((double)(time)/(numRangeSize * HBaseRowPeriodMs)) - 1;
   }
 
   public long fragmentOrderToEndTime(int fragmentOrder){
