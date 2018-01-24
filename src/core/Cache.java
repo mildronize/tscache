@@ -87,6 +87,8 @@ public class Cache {
     long startTime_cacheFragment = 0;
     long endTime_cacheFragment = 0;
     int startFOBlock = 0;
+    int endFOBlock = 0;
+    int currentFO = 0;
 
     // First block only
     // -------------------------------------------------------------------------------
@@ -98,17 +100,19 @@ public class Cache {
 
     // body blocks
     // -------------------------------------------------------------------------------
-    for(int i = 1; i < results.size() - 1; i++){
-
-      for(int j = 0; j < indexSize ; j++ ){
+    for(int i = 0; i < results.size() ; i++){
+      if (i != 0 ) startFOBlock = 0;
+      endFOBlock = ( i == results.size() - 1 ) ? endFragmentOrder % indexSize : indexSize;
+      for(int j = startFOBlock; j < endFOBlock ; j++ ){
         currentBit = getBitBoolean(results.get(i).longValue(), j, indexSize);
         // toggle state
         if(currentBit != previousBit){
-          int currentFO = 0; // TODO
+          currentFO = i*indexSize + ( j - 1 ) + startQueryBlockOrder;
           endTime_cacheFragment = fragmentOrderToEndTime(currentFO);
           fragments.add(new CacheFragment(startTime_cacheFragment, endTime_cacheFragment, currentCachedState));
           currentCachedState = !currentCachedState; // toggle state
-          startTime_cacheFragment = fragmentOrderToEndTime(currentFO + 1); // next Fragment order
+          startTime_cacheFragment = fragmentOrderToStartTime(currentFO + 1); // next Fragment order
+          previousBit = currentBit;
         }
       }
     }
@@ -116,9 +120,10 @@ public class Cache {
     // Last block only
     // -------------------------------------------------------------------------------
     // Last CacheFragment create here
-    endTime_cacheFragment = fragmentOrderToEndTime(endFragmentOrder);
-    fragments.add(new CacheFragment(startTime_cacheFragment, endTime_cacheFragment, currentCachedState));
-
+    if(currentFO <  endFragmentOrder) {
+      endTime_cacheFragment = fragmentOrderToEndTime(endFragmentOrder);
+      fragments.add(new CacheFragment(startTime_cacheFragment, endTime_cacheFragment, currentCachedState));
+    }
     return fragments;
   }
 
@@ -180,7 +185,7 @@ public class Cache {
   }
 
   public long fragmentOrderToEndTime(int fragmentOrder){
-    return (fragmentOrder + 1 ) * numRangeSize * HBaseRowPeriodMs;
+    return ( fragmentOrder + 1 ) * numRangeSize * HBaseRowPeriodMs - 1;
   }
 
   public int findStartRowSeq(ArrayList<RowSeq> rowSeqs, long startTime_fo){

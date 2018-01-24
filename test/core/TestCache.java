@@ -36,7 +36,6 @@ public final class TestCache extends BaseTsdbTest {
     assertEquals(tsdb.cache.getBitBoolean(0b010L, 8, 10), true);
     assertEquals(tsdb.cache.getBitBoolean(0b010L, 9, 10), false);
 
-
   }
 
   @Test
@@ -69,6 +68,14 @@ public final class TestCache extends BaseTsdbTest {
   }
 
   @Test
+  public void fragmentOrderToStartTime(){
+    Cache c = new Cache(tsdb, 2);
+    assertEquals(0, c.fragmentOrderToStartTime(0));
+    assertEquals(7200000, c.fragmentOrderToStartTime(1));
+    assertEquals(14400000, c.fragmentOrderToStartTime(2));
+  }
+
+  @Test
   public void endTimeToFragmentOrder(){
     /*
             0 -  7199 999 -> FO = -1 // no ending fo, no need to cache
@@ -92,6 +99,15 @@ public final class TestCache extends BaseTsdbTest {
     assertEquals(2, c.endTimeToFragmentOrder(28799999));
   }
 
+  @Test
+  public void fragmentOrderToEndTime(){
+    Cache c = new Cache(tsdb, 2);
+    assertEquals(7199999, c.fragmentOrderToEndTime(0));
+    assertEquals(14399999, c.fragmentOrderToEndTime(1));
+    assertEquals(21599999, c.fragmentOrderToEndTime(2));
+    assertEquals(28799999, c.fragmentOrderToEndTime(3));
+  }
+
 
   @Test
   public void buildFragmentsFromBits_head_body_tail() throws Exception{
@@ -108,14 +124,83 @@ public final class TestCache extends BaseTsdbTest {
     expected.add(new CacheFragment(c.fragmentOrderToStartTime(54),c.fragmentOrderToEndTime(63), false));
 
     expected.add(new CacheFragment(c.fragmentOrderToStartTime(64),c.fragmentOrderToEndTime(71), true));
-    expected.add(new CacheFragment(c.fragmentOrderToStartTime(72),c.fragmentOrderToEndTime(89), false));
-    expected.add(new CacheFragment(c.fragmentOrderToStartTime(90),c.fragmentOrderToEndTime(135), true));
+    expected.add(new CacheFragment(c.fragmentOrderToStartTime(72),c.fragmentOrderToEndTime(90), false));
+    expected.add(new CacheFragment(c.fragmentOrderToStartTime(91),c.fragmentOrderToEndTime(135), true));
 
     expected.add(new CacheFragment(c.fragmentOrderToStartTime(136),c.fragmentOrderToEndTime(137), false));
 
     ArrayList<CacheFragment> actual = c.buildFragmentsFromBits(results, 0, 137,64);
     assertEquals(expected.size(), actual.size());
+
+    for(int i =0;i< expected.size();i++){
+      System.out.println(i);
+      assertTrue(expected.get(i).compareTo(actual.get(i)));
+    }
   }
+
+  @Test
+  public void buildFragmentsFromBits_head_body_tail_2() throws Exception{
+    Cache c = tsdb.cache;
+    ArrayList<Long> results = new ArrayList<Long>();
+    // 0 or false means in cache;
+    // start                    s
+    results.add(new Long(0b0000000000000000000000000000000000000000000000000000001111111111L));
+    // end                                                                                   e
+    ArrayList<CacheFragment> expected = new ArrayList<CacheFragment>();
+    expected.add(new CacheFragment(c.fragmentOrderToStartTime(0),c.fragmentOrderToEndTime(53), true));
+    expected.add(new CacheFragment(c.fragmentOrderToStartTime(54),c.fragmentOrderToEndTime(60), false));
+
+    ArrayList<CacheFragment> actual = c.buildFragmentsFromBits(results, 0, 60,64);
+    assertEquals(expected.size(), actual.size());
+
+    for(int i =0;i< expected.size();i++){
+      System.out.println(i);
+      assertTrue(expected.get(i).compareTo(actual.get(i)));
+    }
+  }
+
+  @Test
+  public void buildFragmentsFromBits_start_w_zero() throws Exception{
+    Cache c = tsdb.cache;
+    ArrayList<Long> results = new ArrayList<Long>();
+    // 0 or false means in cache;
+    // start                    s
+    results.add(new Long(0b0000000000000000000000000000000000000000000000000000001111111111L));
+    // end                                                                                      e
+    ArrayList<CacheFragment> expected = new ArrayList<CacheFragment>();
+    expected.add(new CacheFragment(c.fragmentOrderToStartTime(0),c.fragmentOrderToEndTime(53), true));
+    expected.add(new CacheFragment(c.fragmentOrderToStartTime(54),c.fragmentOrderToEndTime(63), false));
+
+    ArrayList<CacheFragment> actual = c.buildFragmentsFromBits(results, 0, 63,64);
+    assertEquals(expected.size(), actual.size());
+
+    for(int i =0;i< expected.size();i++){
+      System.out.println(i);
+      assertTrue(expected.get(i).compareTo(actual.get(i)));
+    }
+  }
+
+  @Test
+  public void buildFragmentsFromBits_start_wo_zero() throws Exception{
+    Cache c = tsdb.cache;
+    ArrayList<Long> results = new ArrayList<Long>();
+    // 0 or false means in cache;
+    // start                         s
+    results.add(new Long(0b0000000000000000000000000000000000000000000000000000001111111111L));
+    // end                                                                                      e
+    ArrayList<CacheFragment> expected = new ArrayList<CacheFragment>();
+    expected.add(new CacheFragment(c.fragmentOrderToStartTime(4),c.fragmentOrderToEndTime(53), true));
+    expected.add(new CacheFragment(c.fragmentOrderToStartTime(54),c.fragmentOrderToEndTime(63), false));
+
+    ArrayList<CacheFragment> actual = c.buildFragmentsFromBits(results, 4, 63,64);
+    assertEquals(expected.size(), actual.size());
+
+    for(int i =0;i< expected.size();i++){
+      System.out.println(i);
+      assertTrue(expected.get(i).compareTo(actual.get(i)));
+    }
+  }
+
 
 
 }

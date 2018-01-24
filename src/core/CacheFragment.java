@@ -28,4 +28,14 @@ final class CacheFragment {
   public long getEndTime() {
     return endTime;
   }
+
+  public boolean compareTo(CacheFragment fragment){
+    if(startTime != fragment.getStartTime())
+      return false;
+    if(endTime != fragment.getEndTime())
+      return false;
+    if(cacheState != fragment.isInCache())
+      return false;
+    return true;
+  }
 }
