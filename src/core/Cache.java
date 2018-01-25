@@ -62,11 +62,11 @@ public class Cache {
   }
 
   public Cache(TSDB tsdb, int numRangeSize) {
-    LOG.debug("Create Cache object");
-    this.tsdb = tsdb;
+    this(tsdb);
     this.numRangeSize = numRangeSize;
-    lookupTable = new CacheLookupTable();
   }
+
+  // ----- buildCacheFragments Helper -------
 
   public boolean getBitBoolean(long num, int position, int maxNumBits) throws Exception{
     // maxNumBits: max is 64
@@ -133,8 +133,7 @@ public class Cache {
     // First miss
     if(lookupTable.isEmpty()) {
       cacheFragments = new ArrayList<CacheFragment>();
-      CacheFragment cacheFragment = new CacheFragment(tsdbQuery.getStartTime(), tsdbQuery.getEndTime(), false);
-      cacheFragments.add(cacheFragment);
+      cacheFragments.add(new CacheFragment(tsdbQuery.getStartTime(), tsdbQuery.getEndTime(), false));
     }else {
       // XOR operation for finding which part in cache or not?
       int start_fo = startTimeToFragmentOrder(tsdbQuery.getStartTime());
@@ -149,16 +148,54 @@ public class Cache {
         return null;
       }
 
-      // Todo: add head if exist
-      // Todo: add tail if exist
+      // add head (not in cache) if exist
+      if(tsdbQuery.getStartTime() < fragmentOrderToStartTime(start_fo)){
+        cacheFragments.add(0, new CacheFragment(tsdbQuery.getStartTime(), fragmentOrderToEndTime(start_fo), false));
+      }
+      // add tail (not in cache) if exist
+      if(tsdbQuery.getEndTime() > fragmentOrderToEndTime(end_fo)){
+        cacheFragments.add(new CacheFragment(fragmentOrderToStartTime(end_fo), tsdbQuery.getEndTime(), false));
+      }
     }
     return cacheFragments;
   }
 
-  public Deferred<TreeMap<byte[], Span>> findCache(CacheFragment fragment){
-    // get time
-    long startTime = fragment.getStartTime();
-    long endTime = fragment.getEndTime();
+  // -------------------------- //
+  // findCache helper functions //
+  // -------------------------- //
+
+  public ArrayList<String> processKeyCache(CacheFragment fragment, byte[] metric, byte[] tags ){
+    // Generate a list of keys what to get from Memcached
+    ArrayList<String> result = new ArrayList<String>();
+
+    // get a list of Fragment order that to get
+    // 1 fo = 1 key
+    int start_fragmentOrder = startTimeToFragmentOrder(fragment.getStartTime());
+    int end_fragmentOrder = endTimeToFragmentOrder(fragment.getEndTime());
+    for (int fo = start_fragmentOrder; fo <= end_fragmentOrder; fo ++){
+      long time = fragmentOrderToStartTime(fo);
+
+
+    }
+
+    return result;
+  }
+
+  public Deferred<TreeMap<byte[], Span>> findCache(TsdbQuery tsdbQuery, CacheFragment fragment){
+
+    final MemcachedClient memcachedClient;
+    try {
+      memcachedClient = new MemcachedClient(new
+        InetSocketAddress(memcachedHost, memcachedPort));
+    }catch(IOException e){
+      return Deferred.fromError(e);
+    }
+    LOG.debug("Connected to memcached server");
+
+    // get metric
+
+    // get tags
+
 
     // calc
 
@@ -230,15 +267,15 @@ public class Cache {
     // save to memached
     // find fragment order of start & end time
     final ArrayList<Deferred<Boolean>> deferreds = new ArrayList<Deferred<Boolean>>();
-    MemcachedClient memcachedClientTmp = null;
+
+    final MemcachedClient memcachedClient;
     try {
-      memcachedClientTmp = new MemcachedClient(new
+      memcachedClient = new MemcachedClient(new
         InetSocketAddress(memcachedHost, memcachedPort));
     }catch(IOException e){
       return Deferred.fromError(e);
     }
     LOG.debug("Connected to memcached server");
-    final MemcachedClient memcachedClient = memcachedClientTmp;
 
     long startTime = fragment.getStartTime();
     long endTime = fragment.getEndTime();

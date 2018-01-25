@@ -539,12 +539,65 @@ import net.opentsdb.utils.DateTime;
     return tsdbQuery;
   }
 
+  public Deferred<TreeMap<byte[], Span>> findCache(CacheFragment fragment){
+    // get metrics
+    final short metric_width = tsdb.metrics.width();
+
+    // set the metric UID based on the TSUIDs if given, or the metric UID
+    if (tsuids != null && !tsuids.isEmpty()) {
+      final String tsuid = tsuids.get(0);
+      final String metric_uid = tsuid.substring(0, metric_width * 2);
+      metric = UniqueId.stringToUid(metric_uid);
+    }
+
+    // get tags
+    final List<TagVFilter> scanner_filters;
+    if (filters != null) {
+      scanner_filters = new ArrayList<TagVFilter>(filters.size());
+      for (final TagVFilter filter : filters) {
+        if (filter.postScan()) {
+          scanner_filters.add(filter);
+        }
+      }
+    } else {
+      return Deferred.fromError(new Exception("Tags error"));
+    }
+
+    // convert tags to array of bytes
+    byte[] tags;
+
+    final short name_width = tsdb.tag_names.width();
+    final short value_width = tsdb.tag_values.width();
+    final short tag_bytes = (short) (name_width + value_width);
+    final short metric_ts_bytes = (short) (Const.SALT_WIDTH()
+                                          + tsdb.metrics.width()
+                                          + Const.TIMESTAMP_BYTES);
+
+    // get name of
+    UniqueId uniqueId = new UniqueId();
+    uniqueId.getIdAsync(name);
+    // UniqueId.getIdAsync
+
+    ArrayList<String> keys = tsdb.cache.processKeyCache(fragment, metric, tags);
+
+    // Step
+    /*
+    1. Get success
+
+    2. Get not success
+    2.1 Get findSpan
+    2.2 storeCache
+
+     */
+    return null;
+  }
+
   private Deferred<TreeMap<byte[], Span>> buildFragmentAsync(final ArrayList<CacheFragment> cacheFragments){
     final ArrayList<Deferred<TreeMap<byte[], Span>>> deferreds = new ArrayList<Deferred<TreeMap<byte[], Span>>>();
 
     for (final CacheFragment cacheFragment: cacheFragments){
       if (cacheFragment.isInCache())  // true in cache
-        deferreds.add(tsdb.cache.findCache(cacheFragment));
+        deferreds.add(findCache(cacheFragment));
       else{
         //copy object TsdbQuery
         //TsdbQuery tsdbQuery=new TsdbQuery(tsdb);
@@ -554,8 +607,7 @@ import net.opentsdb.utils.DateTime;
         deferreds.add(fragmentTsdbQuery.findSpans());
         //LOG.debug("Fragment: " + fragmentTsdbQuery);
       }
-
-      }
+    }
     class GroupFinished implements Callback<TreeMap<byte[], Span>, ArrayList<TreeMap<byte[], Span>>> {
       @Override
       public TreeMap<byte[], Span> call(final ArrayList<TreeMap<byte[], Span>> spans) {
