@@ -13,16 +13,7 @@
 package net.opentsdb.core;
 
 import java.nio.charset.Charset;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.TreeMap;
+import java.util.*;
 
 import net.opentsdb.tree.Tree;
 import net.opentsdb.tsd.BadRequestException;
@@ -574,9 +565,10 @@ import net.opentsdb.utils.DateTime;
                                           + Const.TIMESTAMP_BYTES);
 
     // get name of
-    UniqueId uniqueId = new UniqueId();
-    uniqueId.getIdAsync(name);
-    // UniqueId.getIdAsync
+    HashMap<byte[], byte[]> tag_pairs = new HashMap<byte[], byte[]>();
+    key_tmp = tsdb.getUIDAsync(UniqueId.UniqueIdType.TAGK, key);
+    value_tmp = tsdb.getUIDAsync(UniqueId.UniqueIdType.TAGK, value);
+    tag_pairs.put(key_tmp, value_tmp);
 
     ArrayList<String> keys = tsdb.cache.processKeyCache(fragment, metric, tags);
 
