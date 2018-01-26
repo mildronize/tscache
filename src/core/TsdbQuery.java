@@ -541,18 +541,6 @@ import net.opentsdb.utils.DateTime;
       metric = UniqueId.stringToUid(metric_uid);
     }
 
-    // get tags
-    final List<TagVFilter> scanner_filters;
-    if (filters != null) {
-      scanner_filters = new ArrayList<TagVFilter>(filters.size());
-      for (final TagVFilter filter : filters) {
-        if (filter.postScan()) {
-          scanner_filters.add(filter);
-        }
-      }
-    } else {
-      return Deferred.fromError(new Exception("Tags error"));
-    }
 
     // convert tags to array of bytes
     byte[] tags;
@@ -560,17 +548,41 @@ import net.opentsdb.utils.DateTime;
     final short name_width = tsdb.tag_names.width();
     final short value_width = tsdb.tag_values.width();
     final short tag_bytes = (short) (name_width + value_width);
-    final short metric_ts_bytes = (short) (Const.SALT_WIDTH()
-                                          + tsdb.metrics.width()
-                                          + Const.TIMESTAMP_BYTES);
+    final short metric_bytes = (short) (Const.SALT_WIDTH()
+                                          + tsdb.metrics.width());
 
     // get name of
-    HashMap<byte[], byte[]> tag_pairs = new HashMap<byte[], byte[]>();
-    key_tmp = tsdb.getUIDAsync(UniqueId.UniqueIdType.TAGK, key);
-    value_tmp = tsdb.getUIDAsync(UniqueId.UniqueIdType.TAGK, value);
-    tag_pairs.put(key_tmp, value_tmp);
+    HashMap<byte[], byte[]> tagUid_pairs = new HashMap<byte[], byte[]>();
+    // get tags
 
-    ArrayList<String> keys = tsdb.cache.processKeyCache(fragment, metric, tags);
+    // The filters that should trigger a tag resolution. If this list
+    // is empty due to literals or a wildcard star
+
+    // This code support only literal or filter !
+    // one tag k and tag v
+    // in simple case only
+    // Read more in TagVLiteralOrFilter.java
+    if (filters != null) {
+      for (final TagVFilter filter : filters) {
+        // Default true, set to false in finsSpan method only
+        if (filter.postScan() && filter.getType() == "literal_or") {
+          byte[] key_tmp = filter.getTagkBytes();
+          List<byte[]> tagVUids = filter.getTagVUids();
+          if(tagVUids.size() != 1){
+            // TODO: forward action to findSpan
+            return Deferred.fromError(new Exception("Cache support only one tag k and tag v"));
+          }
+          tagUid_pairs.put(key_tmp, tagVUids.get(0));
+        }
+      }
+    } else {
+      // TODO: forward action to findSpan
+      return Deferred.fromError(new Exception("Tags error or no filter literal_or"));
+    }
+
+    byte[] keyBytesTemplate = new byte[metric_bytes + Const.TIMESTAMP_BYTES + tagUid_pairs.size()* tag_bytes ];
+
+    ArrayList<String> keys = tsdb.cache.processKeyCache(fragment, keyBytesTemplate, metric_bytes);
 
     // Step
     /*
@@ -669,10 +681,10 @@ import net.opentsdb.utils.DateTime;
 
   @Override
   public Deferred<DataPoints[]> runAsync() throws HBaseException {
-    return buildFragmentAsync(tsdb.cache.buildCacheFragments(this))
-      .addCallback(new GroupByAndAggregateCB());
+//    return buildFragmentAsync(tsdb.cache.buildCacheFragments(this))
+//      .addCallback(new GroupByAndAggregateCB());
     // Without Cache
-//    return findSpans().addCallback(new GroupByAndAggregateCB());
+    return findSpans().addCallback(new GroupByAndAggregateCB());
   }
 
   /**
@@ -1061,7 +1073,15 @@ import net.opentsdb.utils.DateTime;
         LOG.debug("Key: " + entry.getKey() + ". Value: " + entry.getValue());
      }
 
-     
+      for (final TagVFilter filter : filters) {
+        // Default true, set to false in finsSpan method only
+        LOG.debug(filter.toString());
+        LOG.debug(Arrays.toString(filter.getTagkBytes()));
+        List<byte[]> tagVUids = filter.getTagVUids();
+        for (final byte[] tagVUid: tagVUids){
+          LOG.debug(Arrays.toString(tagVUid));
+        }
+      }
 
       if (query_stats != null) {
         query_stats.addStat(query_index, QueryStat.QUERY_SCAN_TIME, 

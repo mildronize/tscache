@@ -49,6 +49,8 @@ public class Cache {
   private final short rowSeqQualifier_numBytes = 2;
   private final short rowSeqValue_numBytes = 2;
 
+  private static final short NUM_RANGE_SIZE = 2;
+
   private final String memcachedHost = "memcached";
   private final int memcachedPort = 11211;
   private final int memcachedExpiredTime = 20;
@@ -57,7 +59,7 @@ public class Cache {
   public Cache(TSDB tsdb) {
     LOG.debug("Create Cache object");
     this.tsdb = tsdb;
-    this.numRangeSize = 4;
+    this.numRangeSize = NUM_RANGE_SIZE;
     lookupTable = new CacheLookupTable();
   }
 
@@ -164,7 +166,7 @@ public class Cache {
   // findCache helper functions //
   // -------------------------- //
 
-  public ArrayList<String> processKeyCache(CacheFragment fragment, byte[] metric, byte[] tags ){
+  public ArrayList<String> processKeyCache(CacheFragment fragment, byte[] keyBytesTemplate, short metric_bytes){
     // Generate a list of keys what to get from Memcached
     ArrayList<String> result = new ArrayList<String>();
 
@@ -177,7 +179,6 @@ public class Cache {
 
 
     }
-
     return result;
   }
 
