@@ -175,35 +175,31 @@ public class Cache {
     int start_fragmentOrder = startTimeToFragmentOrder(fragment.getStartTime());
     int end_fragmentOrder = endTimeToFragmentOrder(fragment.getEndTime());
     for (int fo = start_fragmentOrder; fo <= end_fragmentOrder; fo ++){
-      long time = fragmentOrderToStartTime(fo);
+      long timestamp = fragmentOrderToStartTime(fo);
+      // we only accept positive unix epoch timestamps in seconds or milliseconds
+      if (timestamp < 0 || ((timestamp & Const.SECOND_MASK) != 0 &&
+        timestamp > 9999999999999L)) {
+        throw new IllegalArgumentException((timestamp < 0 ? "negative " : "bad")
+          + " timestamp=" + timestamp
+          + " when trying to processKeyCache with keyBytesTemplate: " + Arrays.toString(keyBytesTemplate));
+      }
 
+      long base_time;
+
+      if ((timestamp & Const.SECOND_MASK) != 0) {
+        // drop the ms timestamp to seconds to calculate the base timestamp
+        base_time = ((timestamp / 1000) -
+          ((timestamp / 1000) % Const.MAX_TIMESPAN));
+      } else {
+        base_time = (timestamp - (timestamp % Const.MAX_TIMESPAN));
+      }
+
+      Bytes.setInt(keyBytesTemplate, (int) base_time, metric_bytes);
 
     }
     return result;
   }
 
-  public Deferred<TreeMap<byte[], Span>> findCache(TsdbQuery tsdbQuery, CacheFragment fragment){
-
-    final MemcachedClient memcachedClient;
-    try {
-      memcachedClient = new MemcachedClient(new
-        InetSocketAddress(memcachedHost, memcachedPort));
-    }catch(IOException e){
-      return Deferred.fromError(e);
-    }
-    LOG.debug("Connected to memcached server");
-
-    // get metric
-
-    // get tags
-
-
-    // calc
-
-    // find in cache
-
-    return null;
-  }
 
   // -------------------------- //
   // storeCache helper functions //
