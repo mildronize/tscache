@@ -193,9 +193,10 @@ public class Cache {
       } else {
         base_time = (timestamp - (timestamp % Const.MAX_TIMESPAN));
       }
-
-      Bytes.setInt(keyBytesTemplate, (int) base_time, metric_bytes);
-
+      byte[] key = new byte[keyBytesTemplate.length];
+      System.arraycopy(keyBytesTemplate, 0, row, 0 , keyBytesTemplate.length);
+      Bytes.setInt(key, (int) base_time, metric_bytes);
+      result.add(Base64.getEncoder().encodeToString(key));
     }
     return result;
   }
