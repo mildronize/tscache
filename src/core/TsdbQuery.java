@@ -12,11 +12,14 @@
 // see <http://www.gnu.org/licenses/>.
 package net.opentsdb.core;
 
+import java.io.IOException;
+import java.net.InetSocketAddress;
 import java.nio.charset.Charset;
 import java.util.*;
 
 import net.opentsdb.tree.Tree;
 import net.opentsdb.tsd.BadRequestException;
+import net.spy.memcached.MemcachedClient;
 import org.jboss.netty.handler.codec.http.HttpResponseStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -531,6 +534,19 @@ import net.opentsdb.utils.DateTime;
   }
 
   public Deferred<TreeMap<byte[], Span>> findCache(CacheFragment fragment){
+    // finally the result is one object!
+    final ArrayList<Deferred<byte[]>> deferreds = new ArrayList<Deferred<byte[]>>();
+    final byte[] result_key;
+
+    final MemcachedClient memcachedClient;
+    try {
+      memcachedClient = tsdb.cache.createMemcachedConnection();
+    }catch(IOException e){
+      // TODO: forward action to findSpan
+      return Deferred.fromError(e);
+    }
+    LOG.debug("Connected to memcached server");
+
     // get metrics
     final short metric_width = tsdb.metrics.width();
 
@@ -583,6 +599,48 @@ import net.opentsdb.utils.DateTime;
     byte[] keyBytesTemplate = new byte[metric_bytes + Const.TIMESTAMP_BYTES + tagUid_pairs.size()* tag_bytes ];
 
     ArrayList<String> keys = tsdb.cache.processKeyCache(fragment, keyBytesTemplate, metric_bytes);
+    // Select first key of span as a key of the result
+    if(keys.size() == 0){
+      // TODO: forward action to findSpan
+      throw new BadRequestException(HttpResponseStatus.BAD_REQUEST,
+        "Can't get key of memcached item");
+    }
+    result_key = Base64.getDecoder().decode(keys.get(0));
+    for (final String key: keys){
+      deferreds.add(tsdb.cache.getMemcachedAsync(memcachedClient,key));
+    }
+
+    class GroupFinished implements Callback<TreeMap<byte[], Span>, ArrayList<byte[]>> {
+      @Override
+      public TreeMap<byte[], Span> call(final ArrayList<byte[]> raw_results) {
+        // merge each TreeMap together
+        final short metric_width = tsdb.metrics.width();
+        final TreeMap<byte[], Span> result_spans = // The key is a row key from HBase.
+          new TreeMap<byte[], Span>(new SpanCmp(
+            (short)(Const.SALT_WIDTH() + metric_width)));
+        LOG.debug("GroupFinished: Span size: " + spans.size());
+        result_spans.put(result_key, tsdb.cache.deserializeToSpan(raw_results));
+        return result_spans;
+      }
+
+    }
+
+    class ErrorCB implements Callback<Object, Exception> {
+      public Object call(final Exception e) throws Exception {
+        // TODO: forward action to findSpan
+        memcachedClient.shutdown();
+        throw new BadRequestException(HttpResponseStatus.BAD_REQUEST,
+          e.getMessage(), "Can't get data", e);
+      }
+    }
+
+    class FinishCacheCB implements Callback<TreeMap<byte[], Span>, TreeMap<byte[], Span>> {
+      @Override
+      public TreeMap<byte[], Span> call(final TreeMap<byte[], Span> result) {
+        memcachedClient.shutdown();
+        return result;
+      }
+    }
 
     // Step
     /*
@@ -593,7 +651,10 @@ import net.opentsdb.utils.DateTime;
     2.2 storeCache
 
      */
-    return null;
+    return Deferred.groupInOrder(deferreds)
+      .addCallback(new GroupFinished())
+      .addCallback(new FinishCacheCB())
+      .addErrback(new ErrorCB());
   }
 
   private Deferred<TreeMap<byte[], Span>> buildFragmentAsync(final ArrayList<CacheFragment> cacheFragments){

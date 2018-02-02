@@ -3,6 +3,7 @@ package net.opentsdb.core;
 import com.stumbleupon.async.Callback;
 import com.stumbleupon.async.Deferred;
 import net.spy.memcached.MemcachedClient;
+import net.spy.memcached.internal.GetFuture;
 import net.spy.memcached.internal.OperationFuture;
 import org.hbase.async.Bytes;
 import org.slf4j.Logger;
@@ -239,18 +240,18 @@ public class Cache {
   }
 
   public Deferred<Boolean> setMemcached(MemcachedClient client, HashMap<String, byte[]> item){
-    LOG.debug("setMemcached start");
+    LOG.debug("setMemcachedAsync start");
     if (client == null) {
       String msg = "MemcachedClient object is null";
       LOG.error(msg);
       return Deferred.fromError(new Exception(msg));
     }
-    LOG.debug("setMemcached client ready ");
+    LOG.debug("setMemcachedAsync client ready ");
     String key = item.entrySet().iterator().next().getKey();
     byte[] value = item.entrySet().iterator().next().getValue();
-    LOG.debug("setMemcached data: ("+ key +") | " + Arrays.toString(value));
+    LOG.debug("setMemcachedAsync data: ("+ key +") | " + Arrays.toString(value));
     OperationFuture<Boolean> future = client.set(key, memcachedExpiredTime, value);
-    LOG.debug("setMemcached set!");
+    LOG.debug("setMemcachedAsync set!");
     try {
       return Deferred.fromResult(future.get(memcachedVerifyingTime, TimeUnit.SECONDS));
     }catch (Exception e){
@@ -261,6 +262,11 @@ public class Cache {
   }
 
 
+
+  public MemcachedClient createMemcachedConnection() throws IOException{
+    return new MemcachedClient(new InetSocketAddress(memcachedHost, memcachedPort));
+  }
+
   public Deferred<Boolean> storeCache(CacheFragment fragment, TreeMap<byte[], Span> spans){
     // save to memached
     // find fragment order of start & end time
@@ -268,8 +274,7 @@ public class Cache {
 
     final MemcachedClient memcachedClient;
     try {
-      memcachedClient = new MemcachedClient(new
-        InetSocketAddress(memcachedHost, memcachedPort));
+      memcachedClient = createMemcachedConnection();
     }catch(IOException e){
       return Deferred.fromError(e);
     }
@@ -361,7 +366,6 @@ public class Cache {
       @Override
       public Boolean call(final ArrayList<Boolean> result) {
         memcachedClient.shutdown();
-        // TODO: update cacheIndexes
         lookupTable.mark(start_fo, result.size());
         LOG.debug("UpdateCacheCB");
         return true;
@@ -503,7 +507,7 @@ public class Cache {
     return rowSeq;
   }
 
-  private Span bytesRangeToSpan(byte[] bytes, long cursor, long len){
+  private Span bytesRangeToSpan(byte[] bytes, long cursor){
     Span span = new Span(tsdb);
     long rowSeqCount = getNumberBytesRange(bytes, cursor, rowSeqCount_numBytes);
     cursor += rowSeqCount_numBytes;
@@ -515,6 +519,37 @@ public class Cache {
       cursor += rowSeqLength_numBytes + rowSeq_length;
     }
 
+    return span;
+  }
+
+  public Deferred<byte[]> getMemcachedAsync(MemcachedClient client, String key){
+    LOG.debug("getMemcacheAsync start");
+    if (client == null) {
+      String msg = "MemcachedClient object is null";
+      LOG.error(msg);
+      return Deferred.fromError(new Exception(msg));
+    }
+    LOG.debug("getMemcacheAsync client ready ");
+    GetFuture<Object> future = client.asyncGet(key);
+    LOG.debug("getMemcacheAsync get!");
+    try {
+      return Deferred.fromResult((byte[])future.get(memcachedVerifyingTime, TimeUnit.SECONDS));
+    }catch (Exception e){
+      String msg = "Failed to get value for key" + key + " : " + e.getMessage();
+      LOG.error(msg);
+      return Deferred.fromError(new Exception(msg));
+    }
+  }
+
+
+  // Convert a pair of key and value in Memcached into TreeMap<Byte[], Span> (Raw data from hbase)
+  // Extract array of byte into a Span ( list of RowSeq)
+  public Span deserializeToSpan(ArrayList<byte[]> results){
+    //TODO: Optimize size of variables and speed
+    Span span = new Span(tsdb);
+    for (final byte[] result : results){
+      span.addAll(bytesRangeToSpan(result, 0).getRows());
+    }
     return span;
   }
 
