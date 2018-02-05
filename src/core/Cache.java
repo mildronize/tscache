@@ -195,7 +195,7 @@ public class Cache {
         base_time = (timestamp - (timestamp % Const.MAX_TIMESPAN));
       }
       byte[] key = new byte[keyBytesTemplate.length];
-      System.arraycopy(keyBytesTemplate, 0, row, 0 , keyBytesTemplate.length);
+      System.arraycopy(keyBytesTemplate, 0, key, 0 , keyBytesTemplate.length);
       Bytes.setInt(key, (int) base_time, metric_bytes);
       result.add(Base64.getEncoder().encodeToString(key));
     }

@@ -618,7 +618,7 @@ import net.opentsdb.utils.DateTime;
         final TreeMap<byte[], Span> result_spans = // The key is a row key from HBase.
           new TreeMap<byte[], Span>(new SpanCmp(
             (short)(Const.SALT_WIDTH() + metric_width)));
-        LOG.debug("GroupFinished: Span size: " + spans.size());
+        LOG.debug("GroupFinished: Span size: " + raw_results.size());
         result_spans.put(result_key, tsdb.cache.deserializeToSpan(raw_results));
         return result_spans;
       }
@@ -660,7 +660,10 @@ import net.opentsdb.utils.DateTime;
   private Deferred<TreeMap<byte[], Span>> buildFragmentAsync(final ArrayList<CacheFragment> cacheFragments){
     final ArrayList<Deferred<TreeMap<byte[], Span>>> deferreds = new ArrayList<Deferred<TreeMap<byte[], Span>>>();
 
+    LOG.debug("List of CacheFragment:");
+
     for (final CacheFragment cacheFragment: cacheFragments){
+      LOG.debug(cacheFragment.toString());
       if (cacheFragment.isInCache())  // true in cache
         deferreds.add(findCache(cacheFragment));
       else{
@@ -742,10 +745,10 @@ import net.opentsdb.utils.DateTime;
 
   @Override
   public Deferred<DataPoints[]> runAsync() throws HBaseException {
-//    return buildFragmentAsync(tsdb.cache.buildCacheFragments(this))
-//      .addCallback(new GroupByAndAggregateCB());
+    return buildFragmentAsync(tsdb.cache.buildCacheFragments(this))
+      .addCallback(new GroupByAndAggregateCB());
     // Without Cache
-    return findSpans().addCallback(new GroupByAndAggregateCB());
+//    return findSpans().addCallback(new GroupByAndAggregateCB());
   }
 
   /**

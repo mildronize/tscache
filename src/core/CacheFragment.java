@@ -38,4 +38,9 @@ final class CacheFragment {
       return false;
     return true;
   }
+
+  @Override
+  public String toString(){
+    return "[ " + startTime + " , " + endTime + " ]: " + cacheState;
+  }
 }
