@@ -660,10 +660,8 @@ import net.opentsdb.utils.DateTime;
   private Deferred<TreeMap<byte[], Span>> buildFragmentAsync(final ArrayList<CacheFragment> cacheFragments){
     final ArrayList<Deferred<TreeMap<byte[], Span>>> deferreds = new ArrayList<Deferred<TreeMap<byte[], Span>>>();
 
-    LOG.debug("List of CacheFragment:");
-
     for (final CacheFragment cacheFragment: cacheFragments){
-      LOG.debug(cacheFragment.toString());
+
       if (cacheFragment.isInCache())  // true in cache
         deferreds.add(findCache(cacheFragment));
       else{

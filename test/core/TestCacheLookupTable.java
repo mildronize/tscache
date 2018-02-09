@@ -58,6 +58,13 @@ public class TestCacheLookupTable {
   }
 
   @Test
+  public void headPartialMarkedBlock() {
+    assertEquals(new Long(0b0011111111111111111111111111111111111111111111111111111111111111L), lookupTable.headPartialMarkedBlock(2));
+    assertEquals(new Long(0b1111111111111111111111111111111111111111111111111111111111111111L), lookupTable.headPartialMarkedBlock(0));
+    assertEquals(new Long(0b0000000000000000000000000000000000000000000000000000000000000000L), lookupTable.headPartialMarkedBlock(64));
+  }
+
+  @Test
   public void mark_startFO_0_1() {
     int start_fo = 0;
     int numFragment = 1;
@@ -238,6 +245,72 @@ public class TestCacheLookupTable {
     assertEquals(3,  lookupTable.getCacheIndexes().size());
     assertEquals(0b0011111111111111111111111111111111111111111111111111111111111111L, lookupTable.getCacheIndexes().get(1).longValue());
     assertEquals(0b1111111100000000000000000000000000000000000000000000000000000000L, lookupTable.getCacheIndexes().get(2).longValue());
+  }
+  @Test
+  public void convertToQueryIndexes_1_min(){
+    ArrayList<Long> actual = lookupTable.convertToQueryIndexes(0, 0);
+    assertEquals(1, actual.size());
+    assertEquals(0b1000000000000000000000000000000000000000000000000000000000000000L, actual.get(0).longValue());
+  }
+
+  @Test
+  public void convertToQueryIndexes_1(){
+    ArrayList<Long> actual = lookupTable.convertToQueryIndexes(0, 3);
+    assertEquals(1, actual.size());
+    assertEquals(0b1111000000000000000000000000000000000000000000000000000000000000L, actual.get(0).longValue());
+  }
+  @Test
+  public void convertToQueryIndexes_1_full(){
+    ArrayList<Long> actual = lookupTable.convertToQueryIndexes(0, 63);
+    assertEquals(1, actual.size());
+    assertEquals(0b1111111111111111111111111111111111111111111111111111111111111111L, actual.get(0).longValue());
+  }
+
+  @Test
+  public void convertToQueryIndexes_2(){
+    ArrayList<Long> actual = lookupTable.convertToQueryIndexes(0, 64);
+    assertEquals(2, actual.size());
+    assertEquals(0b1111111111111111111111111111111111111111111111111111111111111111L, actual.get(0).longValue());
+    assertEquals(0b1000000000000000000000000000000000000000000000000000000000000000L, actual.get(1).longValue());
+  }
+
+  @Test
+  public void convertToQueryIndexes_2_full(){
+    ArrayList<Long> actual = lookupTable.convertToQueryIndexes(0, 127);
+    assertEquals(2, actual.size());
+    assertEquals(0b1111111111111111111111111111111111111111111111111111111111111111L, actual.get(0).longValue());
+    assertEquals(0b1111111111111111111111111111111111111111111111111111111111111111L, actual.get(1).longValue());
+  }
+
+  @Test
+  public void convertToQueryIndexes_3(){
+    ArrayList<Long> actual = lookupTable.convertToQueryIndexes(0, 128);
+    assertEquals(3, actual.size());
+    assertEquals(0b1111111111111111111111111111111111111111111111111111111111111111L, actual.get(0).longValue());
+    assertEquals(0b1111111111111111111111111111111111111111111111111111111111111111L, actual.get(1).longValue());
+    assertEquals(0b1000000000000000000000000000000000000000000000000000000000000000L, actual.get(2).longValue());
+  }
+
+  @Test
+  public void convertToQueryIndexes_lead_zero(){
+    ArrayList<Long> actual = lookupTable.convertToQueryIndexes(1, 63);
+    assertEquals(1, actual.size());
+    assertEquals(0b0111111111111111111111111111111111111111111111111111111111111111L, actual.get(0).longValue());
+  }
+
+  @Test
+  public void convertToQueryIndexes_lead_and_tail_zero_1(){
+    ArrayList<Long> actual = lookupTable.convertToQueryIndexes(1, 3);
+    assertEquals(1, actual.size());
+    assertEquals(0b0111000000000000000000000000000000000000000000000000000000000000L, actual.get(0).longValue());
+  }
+
+  @Test
+  public void convertToQueryIndexes_lead_and_tail_zero_2(){
+    ArrayList<Long> actual = lookupTable.convertToQueryIndexes(1, 126);
+    assertEquals(2, actual.size());
+    assertEquals(0b0111111111111111111111111111111111111111111111111111111111111111L, actual.get(0).longValue());
+    assertEquals(0b1111111111111111111111111111111111111111111111111111111111111110L, actual.get(1).longValue());
   }
 
 

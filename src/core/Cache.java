@@ -10,7 +10,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.io.UnsupportedEncodingException;
 import java.net.InetSocketAddress;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
@@ -69,6 +68,10 @@ public class Cache {
     this.numRangeSize = numRangeSize;
   }
 
+  public void dropCaches(){
+    lookupTable = new CacheLookupTable();
+  }
+
   // ----- buildCacheFragments Helper -------
 
   public boolean getBitBoolean(long num, int position, int maxNumBits) throws Exception{
@@ -80,7 +83,7 @@ public class Cache {
     return false;
   }
 
-  public ArrayList<CacheFragment> buildFragmentsFromBits(ArrayList<Long> results, int startFragmentOrder, int endFragmentOrder, int indexSize) throws Exception{
+  public ArrayList<CacheFragment> buildCacheFragmentsFromBits(ArrayList<Long> results, int startFragmentOrder, int endFragmentOrder, int indexSize) throws Exception{
     int startQueryBlockOrder = lookupTable.calcBlockOrder(startFragmentOrder);
     int endQueryBlockOrder = lookupTable.calcBlockOrder(endFragmentOrder);
     ArrayList<CacheFragment> fragments = new ArrayList<CacheFragment>();
@@ -145,7 +148,7 @@ public class Cache {
       // Build body
       ArrayList<Long> results = lookupTable.buildFragmentBits(start_fo, end_fo);
       try {
-        cacheFragments = buildFragmentsFromBits(results, start_fo, end_fo, lookupTable.getIndexSize());
+        cacheFragments = buildCacheFragmentsFromBits(results, start_fo, end_fo, lookupTable.getIndexSize());
       }catch(Exception e){
         LOG.error(e.getMessage());
         return null;
@@ -159,7 +162,24 @@ public class Cache {
       if(tsdbQuery.getEndTime() > fragmentOrderToEndTime(end_fo)){
         cacheFragments.add(new CacheFragment(fragmentOrderToStartTime(end_fo), tsdbQuery.getEndTime(), false));
       }
+
+      // TODO: merge 2 fragment not in cache together
+      /*
+2018-02-08 14:36:23,978 DEBUG [OpenTSDB I/O Worker #1] Cache: [ 1451581200000 , 1451591999999 ]: false
+2018-02-08 14:36:23,978 DEBUG [OpenTSDB I/O Worker #1] Cache: [ 1451584800000 , 30599999999 ]: false
+2018-02-08 14:36:23,978 DEBUG [OpenTSDB I/O Worker #1] Cache: [ 30600000000 , 30974399999 ]: true
+2018-02-08 14:36:23,978 DEBUG [OpenTSDB I/O Worker #1] Cache: [ 30974400000 , 1518069599999 ]: false
+2018-02-08 14:36:23,978 DEBUG [OpenTSDB I/O Worker #1] Cache: [ 1518062400000 , 1518075383754 ]: false
+       */
+
+
     }
+
+    LOG.debug("List of CacheFragment:");
+    for(final CacheFragment cf: cacheFragments){
+      LOG.debug(cf.toString());
+    }
+
     return cacheFragments;
   }
 

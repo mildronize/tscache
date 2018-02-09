@@ -1,7 +1,6 @@
 package net.opentsdb.core;
 
 import net.opentsdb.utils.DateTime;
-import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.powermock.core.classloader.annotations.PrepareForTest;
@@ -129,7 +128,7 @@ public final class TestCache extends BaseTsdbTest {
 
     expected.add(new CacheFragment(c.fragmentOrderToStartTime(136),c.fragmentOrderToEndTime(137), false));
 
-    ArrayList<CacheFragment> actual = c.buildFragmentsFromBits(results, 0, 137,64);
+    ArrayList<CacheFragment> actual = c.buildCacheFragmentsFromBits(results, 0, 137,64);
     assertEquals(expected.size(), actual.size());
 
     for(int i =0;i< expected.size();i++){
@@ -150,7 +149,7 @@ public final class TestCache extends BaseTsdbTest {
     expected.add(new CacheFragment(c.fragmentOrderToStartTime(0),c.fragmentOrderToEndTime(53), true));
     expected.add(new CacheFragment(c.fragmentOrderToStartTime(54),c.fragmentOrderToEndTime(60), false));
 
-    ArrayList<CacheFragment> actual = c.buildFragmentsFromBits(results, 0, 60,64);
+    ArrayList<CacheFragment> actual = c.buildCacheFragmentsFromBits(results, 0, 60,64);
     assertEquals(expected.size(), actual.size());
 
     for(int i =0;i< expected.size();i++){
@@ -171,7 +170,7 @@ public final class TestCache extends BaseTsdbTest {
     expected.add(new CacheFragment(c.fragmentOrderToStartTime(0),c.fragmentOrderToEndTime(53), true));
     expected.add(new CacheFragment(c.fragmentOrderToStartTime(54),c.fragmentOrderToEndTime(63), false));
 
-    ArrayList<CacheFragment> actual = c.buildFragmentsFromBits(results, 0, 63,64);
+    ArrayList<CacheFragment> actual = c.buildCacheFragmentsFromBits(results, 0, 63,64);
     assertEquals(expected.size(), actual.size());
 
     for(int i =0;i< expected.size();i++){
@@ -192,7 +191,7 @@ public final class TestCache extends BaseTsdbTest {
     expected.add(new CacheFragment(c.fragmentOrderToStartTime(4),c.fragmentOrderToEndTime(53), true));
     expected.add(new CacheFragment(c.fragmentOrderToStartTime(54),c.fragmentOrderToEndTime(63), false));
 
-    ArrayList<CacheFragment> actual = c.buildFragmentsFromBits(results, 4, 63,64);
+    ArrayList<CacheFragment> actual = c.buildCacheFragmentsFromBits(results, 4, 63,64);
     assertEquals(expected.size(), actual.size());
 
     for(int i =0;i< expected.size();i++){
