@@ -172,19 +172,23 @@ public class CacheLookupTable {
     return queryIndexes;
   }
 
-  public String printIndexes(ArrayList<Long> indexes){
+  public String printIndexes(ArrayList<Long> indexes, int startBlockOrder, int endBlockOrder) {
     final StringBuilder buf = new StringBuilder(indexes.size() * (1 + 64));
-    for(final Long index : indexes){
-      buf.append(String.format("%64s", Long.toBinaryString(index)).replace(' ', '0'));
+    for(int i = startBlockOrder; i<= endBlockOrder; i++){
+      buf.append(String.format("%64s", Long.toBinaryString(indexes.get(i))).replace(' ', '0'));
       buf.append(" ");
     }
     return buf.toString();
   }
 
+  public String printIndexes(ArrayList<Long> indexes){
+    return printIndexes(indexes, 0, indexes.size() - 1);
+  }
+
   public ArrayList<Long> findCachedBits(ArrayList<Long> queryIndexes, int startBlockOrder, int endBlockOrder){
     ArrayList<Long> result = new ArrayList<Long>();
-    LOG.debug("QueryIndexes: " + printIndexes(queryIndexes));
-    LOG.debug("CacheIndexes: " + printIndexes(cacheIndexes));
+    LOG.debug("QueryIndexes: " + printIndexes(queryIndexes, startBlockOrder, endBlockOrder));
+    LOG.debug("CacheIndexes: " + printIndexes(cacheIndexes, startBlockOrder, endBlockOrder));
     for (int i = startBlockOrder ; i <= endBlockOrder; i++ ){
       LOG.debug("QueryBlockOrder: " + i);
       result.add(new Long(
@@ -192,6 +196,7 @@ public class CacheLookupTable {
           ^ cacheIndexes.get(i).longValue()
         ));
     }
+
     return result;
   }
 
@@ -203,7 +208,8 @@ public class CacheLookupTable {
     int endQueryBlockOrder = calcBlockOrder(endFragmentOrder);
     ArrayList<Long> result;
     // If length of queryIndexes > length of cacheIndexes; XOR until the end of cacheIndexes, after that fill all 1 bits;
-    int numNotInCacheBlock = queryIndexes.size() + startQueryBlockOrder - cacheIndexes.size();
+    int numNotInCacheBlock = queryIndexes.size() - cacheIndexes.size();
+    LOG.debug("numNotInCacheBlock:       " + numNotInCacheBlock + " " +queryIndexes.size() + " " + cacheIndexes.size());
     if (numNotInCacheBlock > 0)
       result = findCachedBits(queryIndexes, startQueryBlockOrder, cacheIndexes.size() - 1);
     else
@@ -211,10 +217,11 @@ public class CacheLookupTable {
     // add tail if exist
     // Fill with all 1 bits; means not in cache
     for(int i = 0 ; i < numNotInCacheBlock; i++){
+      // Assume that the tail is all not in cache. All block will be provided in All 1 bits
       result.add(fulfillBlock());
     }
     //    Note: No head adding
-
+    LOG.debug("Result:       " + printIndexes(result));
     return result;
 
   }
