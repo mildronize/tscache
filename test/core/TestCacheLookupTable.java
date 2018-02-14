@@ -464,19 +464,34 @@ public class TestCacheLookupTable {
     expect.add(new Long(0b1111111111111111111111111111111111111111111111111111111111111111L));
     assertEquals(expect.size(), actual.size());
     assertEquals(expect.get(0).longValue(), actual.get(0).longValue());
-
   }
+
   @Test
-  public void buildFragmentBits_querySize_moreThan_cacheSize_special() {
+  public void buildFragmentBits_querySize_moreThan_cacheSize_special_2() {
     // prepare cacheIndexes
     ArrayList<Long> cachesIndexes = new ArrayList<Long>();
     cachesIndexes.add(lookupTable.emptyBlock());
+    lookupTable.setCacheIndexes(cachesIndexes);
     lookupTable.setCacheIndexes(cachesIndexes);
     ArrayList<Long> actual = lookupTable.buildFragmentBits(128, 191);
     ArrayList<Long> expect = new ArrayList<>();
     expect.add(new Long(0b1111111111111111111111111111111111111111111111111111111111111111L));
     assertEquals(expect.size(), actual.size());
     assertEquals(expect.get(0).longValue(), actual.get(0).longValue());
+  }
 
+  @Test
+  public void buildFragmentBits_querySize_equal_cacheSize() {
+    // prepare cacheIndexes
+    ArrayList<Long> cachesIndexes = new ArrayList<Long>();
+    cachesIndexes.add(lookupTable.emptyBlock());
+    lookupTable.setCacheIndexes(cachesIndexes);
+    lookupTable.setCacheIndexes(cachesIndexes);
+    lookupTable.setCacheIndexes(cachesIndexes);
+    ArrayList<Long> actual = lookupTable.buildFragmentBits(128, 191);
+    ArrayList<Long> expect = new ArrayList<>();
+    expect.add(new Long(0b1111111111111111111111111111111111111111111111111111111111111111L));
+    assertEquals(expect.size(), actual.size());
+    assertEquals(expect.get(0).longValue(), actual.get(0).longValue());
   }
 }

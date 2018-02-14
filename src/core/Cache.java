@@ -113,8 +113,11 @@ public class Cache {
         currentBit = getBitBoolean(results.get(i).longValue(), j, indexSize);
         // toggle state
         if(currentBit != previousBit){
-          currentFO = i*indexSize + ( j - 1 ) + startQueryBlockOrder;
+          // TODO: Test currentFO
+          currentFO = (i + startQueryBlockOrder) * indexSize + ( j - 1 );
+//          currentFO = i*indexSize + ( j - 1 ) + startQueryBlockOrder;
           endTime_cacheFragment = fragmentOrderToEndTime(currentFO);
+          LOG.debug("endTime_cacheFragment: "+ endTime_cacheFragment + " " + currentFO);
           fragments.add(new CacheFragment(startTime_cacheFragment, endTime_cacheFragment, currentCachedState));
           currentCachedState = !currentCachedState; // toggle state
           startTime_cacheFragment = fragmentOrderToStartTime(currentFO + 1); // next Fragment order
@@ -156,11 +159,21 @@ public class Cache {
 
       // add head (not in cache) if exist
       if(tsdbQuery.getStartTime() < fragmentOrderToStartTime(start_fo)){
-        cacheFragments.add(0, new CacheFragment(tsdbQuery.getStartTime(), fragmentOrderToEndTime(start_fo), false));
+        if(cacheFragments.get(0).isInCache() == true)
+          cacheFragments.add(0, new CacheFragment(
+            tsdbQuery.getStartTime(),
+            cacheFragments.get(0).getStartTime() - 1, false));
+        else
+          cacheFragments.get(0).setStartTime(tsdbQuery.getStartTime());
       }
       // add tail (not in cache) if exist
       if(tsdbQuery.getEndTime() > fragmentOrderToEndTime(end_fo)){
-        cacheFragments.add(new CacheFragment(fragmentOrderToStartTime(end_fo), tsdbQuery.getEndTime(), false));
+        if(cacheFragments.get(cacheFragments.size() - 1).isInCache() == true)
+          cacheFragments.add(new CacheFragment(
+            cacheFragments.get(cacheFragments.size() - 1).getEndTime() + 1,
+            tsdbQuery.getEndTime(), false));
+        else
+          cacheFragments.get(0).setEndTime(tsdbQuery.getEndTime());
       }
 
       // TODO: merge 2 fragment not in cache together

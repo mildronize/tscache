@@ -173,6 +173,7 @@ public class CacheLookupTable {
   }
 
   public String printIndexes(ArrayList<Long> indexes, int startBlockOrder, int endBlockOrder) {
+    LOG.debug("[ " +startBlockOrder+ " , "+ endBlockOrder+ " ]");
     final StringBuilder buf = new StringBuilder(indexes.size() * (1 + 64));
     for(int i = startBlockOrder; i<= endBlockOrder; i++){
       buf.append(String.format("%64s", Long.toBinaryString(indexes.get(i))).replace(' ', '0'));
@@ -192,7 +193,7 @@ public class CacheLookupTable {
     for (int i = startBlockOrder ; i <= endBlockOrder; i++ ){
       LOG.debug("QueryBlockOrder: " + i);
       result.add(new Long(
-        queryIndexes.get(i - startBlockOrder).longValue()
+        queryIndexes.get(i).longValue()
           ^ cacheIndexes.get(i).longValue()
         ));
     }
@@ -207,19 +208,28 @@ public class CacheLookupTable {
     int startQueryBlockOrder = calcBlockOrder(startFragmentOrder);
     int endQueryBlockOrder = calcBlockOrder(endFragmentOrder);
     ArrayList<Long> result;
-    // If length of queryIndexes > length of cacheIndexes; XOR until the end of cacheIndexes, after that fill all 1 bits;
-    int numNotInCacheBlock = queryIndexes.size() - cacheIndexes.size();
-    LOG.debug("numNotInCacheBlock:       " + numNotInCacheBlock + " " +queryIndexes.size() + " " + cacheIndexes.size());
-    if (numNotInCacheBlock > 0)
-      result = findCachedBits(queryIndexes, startQueryBlockOrder, cacheIndexes.size() - 1);
-    else
-      result = findCachedBits(queryIndexes, startQueryBlockOrder, endQueryBlockOrder);
-    // add tail if exist
-    // Fill with all 1 bits; means not in cache
-    for(int i = 0 ; i < numNotInCacheBlock; i++){
-      // Assume that the tail is all not in cache. All block will be provided in All 1 bits
-      result.add(fulfillBlock());
+    if(startQueryBlockOrder > cacheIndexes.size() -  1){
+      // If query and cache isn't overlapping
+      result = new ArrayList<Long>();
+      for(int i = startQueryBlockOrder ; i <= endQueryBlockOrder; i++){
+        result.add(fulfillBlock());
+      }
+    } else {
+      // If length of queryIndexes > length of cacheIndexes; XOR until the end of cacheIndexes, after that fill all 1 bits;
+      int numNotInCacheBlock = queryIndexes.size() - cacheIndexes.size();
+      LOG.debug("numNotInCacheBlock:       " + numNotInCacheBlock + " " +queryIndexes.size() + " " + cacheIndexes.size());
+      if (numNotInCacheBlock > 0)
+        result = findCachedBits(queryIndexes, startQueryBlockOrder, cacheIndexes.size() - 1);
+      else
+        result = findCachedBits(queryIndexes, startQueryBlockOrder, endQueryBlockOrder);
+      // add tail if exist
+      // Fill with all 1 bits; means not in cache
+      for(int i = 0 ; i < numNotInCacheBlock; i++){
+        // Assume that the tail is all not in cache. All block will be provided in All 1 bits
+        result.add(fulfillBlock());
+      }
     }
+
     //    Note: No head adding
     LOG.debug("Result:       " + printIndexes(result));
     return result;

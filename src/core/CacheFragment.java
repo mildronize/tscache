@@ -8,6 +8,15 @@ final class CacheFragment {
   private static final Logger LOG = LoggerFactory.getLogger(CacheFragment.class);
 
   private long startTime;
+
+  public void setStartTime(long startTime) {
+    this.startTime = startTime;
+  }
+
+  public void setEndTime(long endTime) {
+    this.endTime = endTime;
+  }
+
   private long endTime;
   private boolean cacheState;
 
