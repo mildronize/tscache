@@ -10,6 +10,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.lang.reflect.Array;
 import java.net.InetSocketAddress;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
@@ -471,7 +472,7 @@ public class Cache {
   private HashMap<String, byte[]> serializeRowSeq(ArrayList<RowSeq> rowSeqs, int start, int length) throws Exception{
     //TODO: Optimize size of variables and speed
     // TODO: Now All Span is stored in one key *****
-    LOG.debug("serializeRowSeq start");
+//    LOG.debug("serializeRowSeq start");
     // Assume that each span element is continuous data
     HashMap<String, byte[]> result = new HashMap<String, byte[]>();
     String key;
@@ -481,7 +482,8 @@ public class Cache {
     // Perform value
     ArrayList<byte[]> tmpValues = new ArrayList<byte[]>();
     // Add Number of Span
-    for(int i = start; i< length; i++) {
+    int end = start + length;
+    for(int i = start; i< end; i++) {
       byte[] tmp = generateRowSeqBytes(rowSeqs.get(i));
       tmpValues.add(numberToBytes(tmp.length, rowSeqLength_numBytes));
       tmpValues.add(tmp);
@@ -499,6 +501,7 @@ public class Cache {
     long result;
     byte[] tmp = new byte[(int)len];
     byte[] tmp2 = {0,0,0,0};
+    LOG.debug(start + " - " + Arrays.toString(bytes) + " " + len);
     System.arraycopy(bytes, (int)start, tmp, 0, (int)len);
     // 1 , 5A
     for (int i = tmp.length - 1 ; i >= 0 ;i--){

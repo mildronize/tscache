@@ -619,6 +619,9 @@ import net.opentsdb.utils.DateTime;
           new TreeMap<byte[], Span>(new SpanCmp(
             (short)(Const.SALT_WIDTH() + metric_width)));
         LOG.debug("GroupFinished: Span size: " + raw_results.size());
+        for(final byte[] result: raw_results){
+          LOG.debug(Arrays.toString(result));
+        }
         result_spans.put(result_key, tsdb.cache.deserializeToSpan(raw_results));
         return result_spans;
       }
