@@ -688,15 +688,24 @@ import net.opentsdb.utils.DateTime;
             (short)(Const.SALT_WIDTH() + metric_width)));
 
         LOG.debug("Merge raw data -> GroupFinished: Span size: " + spans.size());
+        if(spans.size() <= 0)
+          return result_spans;
+        byte[] result_key = spans.get(0).entrySet().iterator().next().getKey();
+        Span result_span = new Span(tsdb);
         for(final TreeMap<byte[], Span> span : spans) {
 
           for (Map.Entry<byte[], Span> element : span.entrySet())
             LOG.debug("Fragment (Span) : " + element.getKey() + "["+ Arrays.toString(element.getKey()) + "]| Value: " + element.getValue());
 
           for(Map.Entry<byte[], Span> entry : span.entrySet()) {
-            result_spans.put(entry.getKey(), entry.getValue());
+            result_span.addAll(entry.getValue().getRows());
           }
         }
+
+        result_spans.put(result_key, result_span);
+
+        for (Map.Entry<byte[], Span> element : result_spans.entrySet())
+          LOG.debug("Merged Span : " + element.getKey() + "["+ Arrays.toString(element.getKey()) + "]| Value: " + element.getValue());
 
         return result_spans;
       }
