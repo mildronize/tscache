@@ -10,7 +10,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.lang.reflect.Array;
 import java.net.InetSocketAddress;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
@@ -42,13 +41,13 @@ public class Cache {
   private String charset = "ASCII";
 
   // Metadata size in byte
-  private final short spanCount_numBytes = 2; // numBytes of number of Span
-  private final short spanLength_numBytes = 4; // numBytes of Span
-  private final short rowSeqCount_numBytes = 2;
-  private final short rowSeqLength_numBytes = 4;
-  private final short rowSeqKey_numBytes = 1;
-  private final short rowSeqQualifier_numBytes = 2;
-  private final short rowSeqValue_numBytes = 2;
+  public static final short spanCount_numBytes = 2; // numBytes of number of Span
+  public static final short spanLength_numBytes = 4; // numBytes of Span
+  public static final short rowSeqCount_numBytes = 2;
+  public static final short ROWSEQ_LENGTH_NUMBYTES = 4;
+  public static final short ROWSEQ_KEY_NUMBYTES = 1;
+  public static final short ROWSEQ_QUALIFIER_NUMBYTES = 2;
+  public static final short ROWSEQ_VALUE_NUMBYTES = 2;
 
   private static final short NUM_RANGE_SIZE = 2;
 
@@ -291,7 +290,7 @@ public class Cache {
 //    LOG.debug("setMemcachedAsync client ready ");
     String key = item.entrySet().iterator().next().getKey();
     byte[] value = item.entrySet().iterator().next().getValue();
-//    LOG.debug("setMemcachedAsync data: ("+ key +") | " + Arrays.toString(value));
+    LOG.debug("setMemcachedAsync data: ("+ key +") | " + Arrays.toString(value));
     OperationFuture<Boolean> future = client.set(key, memcachedExpiredTime, value);
 //    LOG.debug("setMemcachedAsync set!");
     try {
@@ -395,8 +394,10 @@ public class Cache {
       if (remainingRowSeq > 0 ){
         // copy the rest of this rowseq into `restRowSeq`
         try {
-          LOG.debug(rowSeqs.size() + " " + (i - numRangeSize) + " " + (i - numRangeSize + remainingRowSeq));
-          restRowSeq = new ArrayList<RowSeq>(rowSeqs.subList(i - numRangeSize, i - numRangeSize + remainingRowSeq));
+          int start_remainingRowSeq = i - numRangeSize;
+          start_remainingRowSeq = start_remainingRowSeq < 0 ?0:start_remainingRowSeq;
+          LOG.debug(rowSeqs.size() + " " + (start_remainingRowSeq) + " " + (rowSeqs.size()));
+          restRowSeq = new ArrayList<RowSeq>(rowSeqs.subList(start_remainingRowSeq, rowSeqs.size()));
         }catch (IndexOutOfBoundsException e){
           return Deferred.fromError(e);
         }
@@ -462,11 +463,11 @@ public class Cache {
   private byte[] generateRowSeqBytes(RowSeq row){
     ArrayList<byte[]> tmpValues = new ArrayList<byte[]>();
 
-    tmpValues.add(numberToBytes(row.getKey().length, rowSeqKey_numBytes));
+    tmpValues.add(numberToBytes(row.getKey().length, ROWSEQ_KEY_NUMBYTES));
     tmpValues.add(row.getKey());
-    tmpValues.add(numberToBytes(row.getQualifiers().length, rowSeqQualifier_numBytes));
+    tmpValues.add(numberToBytes(row.getQualifiers().length, ROWSEQ_QUALIFIER_NUMBYTES));
     tmpValues.add(row.getQualifiers());
-    tmpValues.add(numberToBytes(row.getQualifiers().length, rowSeqValue_numBytes));
+    tmpValues.add(numberToBytes(row.getValues().length, ROWSEQ_VALUE_NUMBYTES));
     tmpValues.add(row.getValues());
 
     return arrayListToBytes(tmpValues);
@@ -496,7 +497,7 @@ public class Cache {
     int end = start + length;
     for(int i = start; i< end; i++) {
       byte[] tmp = generateRowSeqBytes(rowSeqs.get(i));
-      tmpValues.add(numberToBytes(tmp.length, rowSeqLength_numBytes));
+      tmpValues.add(numberToBytes(tmp.length, ROWSEQ_LENGTH_NUMBYTES));
       tmpValues.add(tmp);
     }
     byte[] value = arrayListToBytes(tmpValues);
@@ -508,17 +509,18 @@ public class Cache {
   // Deserialize helper functions //
   // ---------------------------- //
 
-  private long getNumberBytesRange(byte[] bytes, long start, long len){
+  public long getNumberBytesRange(byte[] bytes, long start, long len){
     long result;
     byte[] tmp = new byte[(int)len];
-    byte[] tmp2 = {0,0,0,0};
+    byte[] long_tmp = {0,0,0,0};
     LOG.debug(start + " - " + Arrays.toString(bytes) + " " + len);
     System.arraycopy(bytes, (int)start, tmp, 0, (int)len);
     // 1 , 5A
-    for (int i = tmp.length - 1 ; i >= 0 ;i--){
-      tmp2[i] = tmp[i];
+    int j = long_tmp.length - 1;
+    for (int i = 0 ; i < tmp.length; i++){
+      long_tmp[j] = tmp[i];
     }
-    result = Bytes.getUnsignedInt(tmp2);
+    result = Bytes.getUnsignedInt(long_tmp);
     return result;
   }
 
@@ -528,42 +530,41 @@ public class Cache {
     byte[] qualifiers;
     byte[] values;
     // Get key
-    long keyLength = getNumberBytesRange(bytes, cursor, rowSeqKey_numBytes);
-    cursor +=  rowSeqKey_numBytes;
+    long keyLength = getNumberBytesRange(bytes, cursor, ROWSEQ_KEY_NUMBYTES);
+    cursor += ROWSEQ_KEY_NUMBYTES;
     key = new byte[(int)keyLength];
     System.arraycopy(bytes, (int)cursor, key, 0, (int)keyLength);
     cursor += keyLength;
     rowSeq.setKey(key);
 
     // Get qualifiers
-    long qualifiersLength = getNumberBytesRange(bytes, cursor, rowSeqQualifier_numBytes);
-    cursor +=  rowSeqQualifier_numBytes;
+    long qualifiersLength = getNumberBytesRange(bytes, cursor, ROWSEQ_QUALIFIER_NUMBYTES);
+    cursor += ROWSEQ_QUALIFIER_NUMBYTES;
     qualifiers = new byte[(int)qualifiersLength];
     System.arraycopy(bytes, (int)cursor, qualifiers, 0, (int)qualifiersLength);
     cursor += qualifiersLength;
     rowSeq.setQualifiers(qualifiers);
 
     // Get values
-    long valuesLength = getNumberBytesRange(bytes, cursor, rowSeqValue_numBytes);
-    cursor +=  rowSeqValue_numBytes;
+    long valuesLength = getNumberBytesRange(bytes, cursor, ROWSEQ_VALUE_NUMBYTES);
+    cursor +=  ROWSEQ_VALUE_NUMBYTES;
     values = new byte[(int)valuesLength];
+    LOG.debug(Arrays.toString(bytes) + " " + cursor + "  " + Arrays.toString(values) + " " + valuesLength);
     System.arraycopy(bytes, (int)cursor, values, 0, (int)valuesLength);
     cursor += valuesLength;
-    rowSeq.setValues(values);
 
+    rowSeq.setValues(values);
     return rowSeq;
   }
 
-  private Span bytesRangeToSpan(byte[] bytes, long cursor){
+  public Span bytesRangeToSpan(byte[] bytes, long cursor){
     Span span = new Span(tsdb);
-    long rowSeqCount = getNumberBytesRange(bytes, cursor, rowSeqCount_numBytes);
-    cursor += rowSeqCount_numBytes;
 
-    for (int i = 0 ;i < rowSeqCount;i++) {
-      long rowSeq_length = getNumberBytesRange(bytes, cursor, rowSeqLength_numBytes);
-      cursor += rowSeqLength_numBytes;
+    for (int i = 0; i < numRangeSize; i++) {
+      long rowSeq_length = getNumberBytesRange(bytes, cursor, ROWSEQ_LENGTH_NUMBYTES);
+      cursor += ROWSEQ_LENGTH_NUMBYTES;
       span.addRowSeq(bytesRangeToRowSeq(bytes, cursor));
-      cursor += rowSeqLength_numBytes + rowSeq_length;
+      cursor += rowSeq_length;
     }
 
     return span;

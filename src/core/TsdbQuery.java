@@ -636,11 +636,12 @@ import net.opentsdb.utils.DateTime;
         final TreeMap<byte[], Span> result_spans = // The key is a row key from HBase.
           new TreeMap<byte[], Span>(new SpanCmp(
             (short)(Const.SALT_WIDTH() + metric_width)));
-        LOG.debug("GroupFinished: Span size: " + raw_results.size());
-//        for(final byte[] result: raw_results){
-//          LOG.debug(Arrays.toString(result));
-//        }
+        LOG.debug("findSpan -> GroupFinished: Span size: " + raw_results.size());
+        for(final byte[] result: raw_results){
+          LOG.debug("Raw of Cache: " + Arrays.toString(result));
+        }
         result_spans.put(result_key, tsdb.cache.deserializeToSpan(raw_results));
+        memcachedClient.shutdown();
         return result_spans;
       }
 
@@ -655,26 +656,8 @@ import net.opentsdb.utils.DateTime;
       }
     }
 
-    class FinishCacheCB implements Callback<TreeMap<byte[], Span>, TreeMap<byte[], Span>> {
-      @Override
-      public TreeMap<byte[], Span> call(final TreeMap<byte[], Span> result) {
-        memcachedClient.shutdown();
-        return result;
-      }
-    }
-
-    // Step
-    /*
-    1. Get success
-
-    2. Get not success
-    2.1 Get findSpan
-    2.2 storeCache
-
-     */
     return Deferred.groupInOrder(deferreds)
       .addCallback(new GroupFinished())
-      .addCallback(new FinishCacheCB())
       .addErrback(new ErrorCB());
   }
 
@@ -704,11 +687,11 @@ import net.opentsdb.utils.DateTime;
           new TreeMap<byte[], Span>(new SpanCmp(
             (short)(Const.SALT_WIDTH() + metric_width)));
 
-        LOG.debug("GroupFinished: Span size: " + spans.size());
+        LOG.debug("Merge raw data -> GroupFinished: Span size: " + spans.size());
         for(final TreeMap<byte[], Span> span : spans) {
 
           for (Map.Entry<byte[], Span> element : span.entrySet())
-            LOG.debug("A Span Key: " + element.getKey() + "["+ Arrays.toString(element.getKey()) + "]| Value: " + element.getValue());
+            LOG.debug("Fragment (Span) : " + element.getKey() + "["+ Arrays.toString(element.getKey()) + "]| Value: " + element.getValue());
 
           for(Map.Entry<byte[], Span> entry : span.entrySet()) {
             result_spans.put(entry.getKey(), entry.getValue());
