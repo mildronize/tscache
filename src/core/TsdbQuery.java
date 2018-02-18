@@ -559,7 +559,6 @@ import net.opentsdb.utils.DateTime;
 
 
     // convert tags to array of bytes
-    byte[] tags;
 
     final short name_width = tsdb.tag_names.width();
     final short value_width = tsdb.tag_values.width();
@@ -568,7 +567,7 @@ import net.opentsdb.utils.DateTime;
                                           + tsdb.metrics.width());
 
     // get name of
-    HashMap<byte[], byte[]> tagUid_pairs = new HashMap<byte[], byte[]>();
+    ArrayList<byte[]> tagUids = new ArrayList<byte[]>();
     // get tags
 
     // The filters that should trigger a tag resolution. If this list
@@ -581,29 +580,48 @@ import net.opentsdb.utils.DateTime;
     if (filters != null) {
       for (final TagVFilter filter : filters) {
         // Default true, set to false in finsSpan method only
-        if (filter.postScan() && filter.getType() == "literal_or") {
+        LOG.debug("FILTER: " + filter.toString());
+        LOG.debug("FILTER: postScan" + filter.postScan());
+        LOG.debug("FILTER: type?" + (filter.getType() == "literal_or"));
+        // TODO: postScan, recheck of postScan is needed to use?
+        if (filter.getType() == "literal_or") {
+          LOG.debug("OK FILTER: " + filter.toString());
           byte[] key_tmp = filter.getTagkBytes();
           List<byte[]> tagVUids = filter.getTagVUids();
           if(tagVUids.size() != 1){
             // TODO: forward action to findSpan
             return Deferred.fromError(new Exception("Cache support only one tag k and tag v"));
           }
-          tagUid_pairs.put(key_tmp, tagVUids.get(0));
+          tagUids.add(key_tmp);
+          tagUids.add(tagVUids.get(0));
         }
       }
     } else {
       // TODO: forward action to findSpan
       return Deferred.fromError(new Exception("Tags error or no filter literal_or"));
     }
-
-    byte[] keyBytesTemplate = new byte[metric_bytes + Const.TIMESTAMP_BYTES + tagUid_pairs.size()* tag_bytes ];
-
+    // TODO: Test this function
+    byte[] tags = tsdb.cache.arrayListToBytes(tagUids);
+    if(tags.length == 0){
+      // TODO: forward action to findSpan
+      return Deferred.fromError(new Exception("Tags should be defined!"));
+    }
+    byte[] keyBytesTemplate = new byte[metric_bytes + Const.TIMESTAMP_BYTES + tags.length];
+    LOG.debug("keyBytesTemplate: " + Arrays.toString(keyBytesTemplate));
+    // add key byte
+    LOG.debug("Add metric into template: " + Arrays.toString(metric));
+    System.arraycopy(metric, 0, keyBytesTemplate, 0 , metric_bytes);
+    LOG.debug("keyBytesTemplate: " + Arrays.toString(keyBytesTemplate));
+    // add tag byte
+    LOG.debug("Add tags into template: " + Arrays.toString(tags));
+    System.arraycopy(tags, 0, keyBytesTemplate, metric_bytes + Const.TIMESTAMP_BYTES , tags.length);
+    LOG.debug("keyBytesTemplate: " + Arrays.toString(keyBytesTemplate));
     ArrayList<String> keys = tsdb.cache.processKeyCache(fragment, keyBytesTemplate, metric_bytes);
     // Select first key of span as a key of the result
     if(keys.size() == 0){
       // TODO: forward action to findSpan
       throw new BadRequestException(HttpResponseStatus.BAD_REQUEST,
-        "Can't get key of memcached item");
+        "Can't build key of cache");
     }
     result_key = Base64.getDecoder().decode(keys.get(0));
     for (final String key: keys){
@@ -619,9 +637,9 @@ import net.opentsdb.utils.DateTime;
           new TreeMap<byte[], Span>(new SpanCmp(
             (short)(Const.SALT_WIDTH() + metric_width)));
         LOG.debug("GroupFinished: Span size: " + raw_results.size());
-        for(final byte[] result: raw_results){
-          LOG.debug(Arrays.toString(result));
-        }
+//        for(final byte[] result: raw_results){
+//          LOG.debug(Arrays.toString(result));
+//        }
         result_spans.put(result_key, tsdb.cache.deserializeToSpan(raw_results));
         return result_spans;
       }

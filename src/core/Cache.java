@@ -160,21 +160,25 @@ public class Cache {
 
       // add head (not in cache) if exist
       if(tsdbQuery.getStartTime() < fragmentOrderToStartTime(start_fo)){
-        if(cacheFragments.get(0).isInCache() == true)
+        CacheFragment firstFragment = cacheFragments.get(0);
+        // TODO: recheck
+        if(firstFragment.isInCache() == true && firstFragment.getStartTime() - 1 > tsdbQuery.getStartTime())
           cacheFragments.add(0, new CacheFragment(
             tsdbQuery.getStartTime(),
-            cacheFragments.get(0).getStartTime() - 1, false));
+            firstFragment.getStartTime() - 1, false));
         else
-          cacheFragments.get(0).setStartTime(tsdbQuery.getStartTime());
+          firstFragment.setStartTime(tsdbQuery.getStartTime());
       }
       // add tail (not in cache) if exist
       if(tsdbQuery.getEndTime() > fragmentOrderToEndTime(end_fo)){
-        if(cacheFragments.get(cacheFragments.size() - 1).isInCache() == true)
+        CacheFragment lastFragment = cacheFragments.get(cacheFragments.size() - 1);
+        if(lastFragment.isInCache() == true &&
+           lastFragment.getEndTime() + 1 < tsdbQuery.getEndTime())
           cacheFragments.add(new CacheFragment(
-            cacheFragments.get(cacheFragments.size() - 1).getEndTime() + 1,
+            lastFragment.getEndTime() + 1,
             tsdbQuery.getEndTime(), false));
         else
-          cacheFragments.get(0).setEndTime(tsdbQuery.getEndTime());
+          lastFragment.setEndTime(tsdbQuery.getEndTime());
       }
 
       // TODO: merge 2 fragment not in cache together
@@ -201,14 +205,17 @@ public class Cache {
   // findCache helper functions //
   // -------------------------- //
 
+
+
   public ArrayList<String> processKeyCache(CacheFragment fragment, byte[] keyBytesTemplate, short metric_bytes){
     // Generate a list of keys what to get from Memcached
     ArrayList<String> result = new ArrayList<String>();
-
+    LOG.debug("Key Template: " + Arrays.toString(keyBytesTemplate));
     // get a list of Fragment order that to get
     // 1 fo = 1 key
     int start_fragmentOrder = startTimeToFragmentOrder(fragment.getStartTime());
     int end_fragmentOrder = endTimeToFragmentOrder(fragment.getEndTime());
+    LOG.debug("process key for getting cache: " +start_fragmentOrder+ " , " + end_fragmentOrder);
     for (int fo = start_fragmentOrder; fo <= end_fragmentOrder; fo ++){
       long timestamp = fragmentOrderToStartTime(fo);
       // we only accept positive unix epoch timestamps in seconds or milliseconds
@@ -231,6 +238,7 @@ public class Cache {
       byte[] key = new byte[keyBytesTemplate.length];
       System.arraycopy(keyBytesTemplate, 0, key, 0 , keyBytesTemplate.length);
       Bytes.setInt(key, (int) base_time, metric_bytes);
+      LOG.debug("Getting Key: " + Arrays.toString(key));
       result.add(Base64.getEncoder().encodeToString(key));
     }
     return result;
@@ -274,19 +282,21 @@ public class Cache {
   }
 
   public Deferred<Boolean> setMemcached(MemcachedClient client, HashMap<String, byte[]> item){
-    LOG.debug("setMemcachedAsync start");
+//    LOG.debug("setMemcachedAsync start");
     if (client == null) {
       String msg = "MemcachedClient object is null";
       LOG.error(msg);
       return Deferred.fromError(new Exception(msg));
     }
-    LOG.debug("setMemcachedAsync client ready ");
+//    LOG.debug("setMemcachedAsync client ready ");
     String key = item.entrySet().iterator().next().getKey();
     byte[] value = item.entrySet().iterator().next().getValue();
-    LOG.debug("setMemcachedAsync data: ("+ key +") | " + Arrays.toString(value));
+//    LOG.debug("setMemcachedAsync data: ("+ key +") | " + Arrays.toString(value));
     OperationFuture<Boolean> future = client.set(key, memcachedExpiredTime, value);
-    LOG.debug("setMemcachedAsync set!");
+//    LOG.debug("setMemcachedAsync set!");
     try {
+//      byte[] result = getMemcachedAsync(client, key).joinUninterruptibly();
+//      LOG.debug("Get result " + key + ": " + Arrays.toString(result));
       return Deferred.fromResult(future.get(memcachedVerifyingTime, TimeUnit.SECONDS));
     }catch (Exception e){
         String msg = "Failed to store value for key" + key + " : " + e.getMessage();
@@ -433,7 +443,7 @@ public class Cache {
     return null;
   }
 
-  private byte[] arrayListToBytes(ArrayList<byte[]> bytes){
+  public byte[] arrayListToBytes(ArrayList<byte[]> bytes){
     int resultValueSize = 0;
     for (byte[] tmp : bytes){
       resultValueSize += tmp.length;
@@ -478,6 +488,7 @@ public class Cache {
     String key;
     // Get first key of the span
     // Convert byte[] key into Base64 Encoding
+    LOG.debug("Storing Key: " + Arrays.toString(rowSeqs.get(start).getKey()));
     key = Base64.getEncoder().encodeToString(rowSeqs.get(start).getKey());
     // Perform value
     ArrayList<byte[]> tmpValues = new ArrayList<byte[]>();
@@ -559,15 +570,15 @@ public class Cache {
   }
 
   public Deferred<byte[]> getMemcachedAsync(MemcachedClient client, String key){
-    LOG.debug("getMemcacheAsync start");
+//    LOG.debug("getMemcacheAsync start");
     if (client == null) {
       String msg = "MemcachedClient object is null";
       LOG.error(msg);
       return Deferred.fromError(new Exception(msg));
     }
-    LOG.debug("getMemcacheAsync client ready ");
+//    LOG.debug("getMemcacheAsync client ready ");
     GetFuture<Object> future = client.asyncGet(key);
-    LOG.debug("getMemcacheAsync get!");
+//    LOG.debug("getMemcacheAsync get!");
     try {
       return Deferred.fromResult((byte[])future.get(memcachedVerifyingTime, TimeUnit.SECONDS));
     }catch (Exception e){
