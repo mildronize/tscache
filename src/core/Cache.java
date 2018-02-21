@@ -2,14 +2,17 @@ package net.opentsdb.core;
 
 import com.stumbleupon.async.Callback;
 import com.stumbleupon.async.Deferred;
+import net.opentsdb.tsd.BadRequestException;
 import net.spy.memcached.MemcachedClient;
 import net.spy.memcached.internal.GetFuture;
 import net.spy.memcached.internal.OperationFuture;
 import org.hbase.async.Bytes;
+import org.jboss.netty.handler.codec.http.HttpResponseStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.lang.reflect.Array;
 import java.net.InetSocketAddress;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
@@ -90,10 +93,10 @@ public class Cache {
     boolean currentCachedState; // true means in cache;
     boolean previousBit; // 0 or false means in cache;
     boolean currentBit; // 0 or false means in cache;
-    long startTime_cacheFragment = 0;
-    long endTime_cacheFragment = 0;
-    int startFOBlock = 0;
-    int endFOBlock = 0;
+    long startTime_cacheFragment;
+    long endTime_cacheFragment;
+    int startFOBlock;
+    int endFOBlock;
     int currentFO = 0;
 
     // First block only
@@ -146,7 +149,11 @@ public class Cache {
     }else {
       // XOR operation for finding which part in cache or not?
       int start_fo = startTimeToFragmentOrder(tsdbQuery.getStartTime());
-      int end_fo = endTimeToFragmentOrder(tsdbQuery.getEndTime());
+      // Including the end of fragment order
+      int end_fo = endTimeToFragmentOrder(tsdbQuery.getEndTime()) - 1;
+
+      LOG.debug("buildCacheFragments - Start FO: " + start_fo +  "( " +tsdbQuery.getStartTime()+")");
+      LOG.debug("buildCacheFragments - End   FO: " + end_fo +  "( " +tsdbQuery.getEndTime()+")");
 
       // Build body
       ArrayList<Long> results = lookupTable.buildFragmentBits(start_fo, end_fo);
@@ -161,7 +168,7 @@ public class Cache {
       if(tsdbQuery.getStartTime() < fragmentOrderToStartTime(start_fo)){
         CacheFragment firstFragment = cacheFragments.get(0);
         // TODO: recheck
-        if(firstFragment.isInCache() == true && firstFragment.getStartTime() - 1 > tsdbQuery.getStartTime())
+        if(firstFragment.isInCache() == true && firstFragment.getStartTime() - 1 >= tsdbQuery.getStartTime())
           cacheFragments.add(0, new CacheFragment(
             tsdbQuery.getStartTime(),
             firstFragment.getStartTime() - 1, false));
@@ -171,8 +178,8 @@ public class Cache {
       // add tail (not in cache) if exist
       if(tsdbQuery.getEndTime() > fragmentOrderToEndTime(end_fo)){
         CacheFragment lastFragment = cacheFragments.get(cacheFragments.size() - 1);
-        if(lastFragment.isInCache() == true &&
-           lastFragment.getEndTime() + 1 < tsdbQuery.getEndTime())
+        if(lastFragment.isInCache() &&
+           lastFragment.getEndTime() + 1 <= tsdbQuery.getEndTime())
           cacheFragments.add(new CacheFragment(
             lastFragment.getEndTime() + 1,
             tsdbQuery.getEndTime(), false));
@@ -180,15 +187,19 @@ public class Cache {
           lastFragment.setEndTime(tsdbQuery.getEndTime());
       }
 
-      // TODO: merge 2 fragment not in cache together
-      /*
-2018-02-08 14:36:23,978 DEBUG [OpenTSDB I/O Worker #1] Cache: [ 1451581200000 , 1451591999999 ]: false
-2018-02-08 14:36:23,978 DEBUG [OpenTSDB I/O Worker #1] Cache: [ 1451584800000 , 30599999999 ]: false
-2018-02-08 14:36:23,978 DEBUG [OpenTSDB I/O Worker #1] Cache: [ 30600000000 , 30974399999 ]: true
-2018-02-08 14:36:23,978 DEBUG [OpenTSDB I/O Worker #1] Cache: [ 30974400000 , 1518069599999 ]: false
-2018-02-08 14:36:23,978 DEBUG [OpenTSDB I/O Worker #1] Cache: [ 1518062400000 , 1518075383754 ]: false
-       */
+      // Fix range
+      CacheFragment lastFragment = cacheFragments.get(cacheFragments.size() - 1);
+      if(lastFragment.getStartTime() == lastFragment.getEndTime()){
+        lastFragment.setStartTime(lastFragment.getStartTime() - 1);
+      }
 
+      // Fix last nd range
+      if(cacheFragments.size() >= 2) {
+        CacheFragment lastNdFragment = cacheFragments.get(cacheFragments.size() - 2);
+        if(lastNdFragment.getEndTime() == lastFragment.getStartTime()){
+          lastNdFragment.setEndTime(lastNdFragment.getEndTime() - 1);
+        }
+      }
 
     }
 
@@ -212,7 +223,9 @@ public class Cache {
     LOG.debug("Key Template: " + Arrays.toString(keyBytesTemplate));
     // get a list of Fragment order that to get
     // 1 fo = 1 key
-    int start_fragmentOrder = startTimeToFragmentOrder(fragment.getStartTime());
+
+    // Retrieve from cache range
+    int start_fragmentOrder = timeToFragmentOrder(fragment.getStartTime()); // use fragment order instead of start_fo
     int end_fragmentOrder = endTimeToFragmentOrder(fragment.getEndTime());
     LOG.debug("process key for getting cache: " +start_fragmentOrder+ " , " + end_fragmentOrder);
     for (int fo = start_fragmentOrder; fo <= end_fragmentOrder; fo ++){
@@ -237,7 +250,9 @@ public class Cache {
       byte[] key = new byte[keyBytesTemplate.length];
       System.arraycopy(keyBytesTemplate, 0, key, 0 , keyBytesTemplate.length);
       Bytes.setInt(key, (int) base_time, metric_bytes);
-      LOG.debug("Getting Key: " + Arrays.toString(key));
+//      LOG.debug("Getting Key: " + Arrays.toString(key));
+      long time = Bytes.getUnsignedInt(key, Const.SALT_WIDTH() + tsdb.metrics.width()) * 1000;
+      LOG.debug("Getting key (FO): " +Arrays.toString(key)+  " - " + time + "  " + timeToFragmentOrder(time));
       result.add(Base64.getEncoder().encodeToString(key));
     }
     return result;
@@ -248,8 +263,12 @@ public class Cache {
   // storeCache helper functions //
   // -------------------------- //
 
+  public int timeToFragmentOrder(long time){
+    return (int)Math.floor((double)time/(numRangeSize * HBaseRowPeriodMs));
+  }
+
   public int startTimeToFragmentOrder(long time){
-    return (int)Math.ceil((double)time/(numRangeSize * HBaseRowPeriodMs));
+    return (int)Math.ceil((double)(time+1)/(numRangeSize * HBaseRowPeriodMs));
   }
 
   public long fragmentOrderToStartTime(int fragmentOrder){
@@ -258,7 +277,7 @@ public class Cache {
 
   public int endTimeToFragmentOrder(long time){
     // return < 0 means no fo, no need to cache
-    return (int)Math.floor((double)(time)/(numRangeSize * HBaseRowPeriodMs)) - 1;
+    return (int)Math.floor((double)(time)/(numRangeSize * HBaseRowPeriodMs));
   }
 
   public long fragmentOrderToEndTime(int fragmentOrder){
@@ -270,9 +289,9 @@ public class Cache {
     LOG.debug(startTime_fo+"");
     int i;
     for ( i = 0; i < rowSeqs.size(); i++) {
-      long baseTime = rowSeqs.get(i).baseTime();
+      long baseTime = rowSeqs.get(i).baseTime() * 1000; // convert to milliseconds
       LOG.debug(baseTime + " | " + rowSeqs.get(i));
-      LOG.debug(baseTime + " >= " + startTime_fo + " AND " + baseTime + " < " + (startTime_fo + HBaseRowPeriod*numRangeSize));
+//      LOG.debug(baseTime + " >= " + startTime_fo + " AND " + baseTime + " < " + (startTime_fo + HBaseRowPeriod*numRangeSize));
       if (baseTime >= startTime_fo && baseTime < ( startTime_fo + HBaseRowPeriod*numRangeSize ) ){
         return i;
       }
@@ -292,6 +311,7 @@ public class Cache {
     byte[] value = item.entrySet().iterator().next().getValue();
     LOG.debug("setMemcachedAsync data: ("+ key +") | " + Arrays.toString(value));
     OperationFuture<Boolean> future = client.set(key, memcachedExpiredTime, value);
+
 //    LOG.debug("setMemcachedAsync set!");
     try {
 //      byte[] result = getMemcachedAsync(client, key).joinUninterruptibly();
@@ -303,8 +323,6 @@ public class Cache {
         return Deferred.fromError(new Exception(msg));
     }
   }
-
-
 
   public MemcachedClient createMemcachedConnection() throws IOException{
     return new MemcachedClient(new InetSocketAddress(memcachedHost, memcachedPort));
@@ -327,10 +345,10 @@ public class Cache {
     long endTime = fragment.getEndTime();
 
     final int start_fo = startTimeToFragmentOrder(startTime);
-    final int end_fo = endTimeToFragmentOrder(endTime); // Not include end fragment order
+    final int end_fo = endTimeToFragmentOrder(endTime);
 
-    long startTime_fo = start_fo * HBaseRowPeriod * numRangeSize;
-    long endTime_fo = end_fo * HBaseRowPeriod * numRangeSize;
+    long startTime_fo = fragmentOrderToStartTime(start_fo);
+//    long endTime_fo = fragmentOrderToEndTime(end_fo);
     // a result (TreeMap<byte[], Span>) can be more than one
 
     LOG.debug(start_fo + " " + end_fo + " " + startTime_fo);
@@ -404,8 +422,10 @@ public class Cache {
       }
       // No need to define ending fragment order
       // In the Last Span if `remainingRowSeq` > 0 means we leave the rest!
-      spanCount ++;
+        spanCount ++;
+
     }
+
 
     class UpdateCacheCB implements Callback<Boolean, ArrayList<Boolean>> {
       @Override
@@ -489,7 +509,10 @@ public class Cache {
     String key;
     // Get first key of the span
     // Convert byte[] key into Base64 Encoding
-    LOG.debug("Storing Key: " + Arrays.toString(rowSeqs.get(start).getKey()));
+    // debug
+    long time = Bytes.getUnsignedInt(rowSeqs.get(start).getKey(), Const.SALT_WIDTH() + tsdb.metrics.width()) * 1000;
+//    LOG.debug("Storing Key: " + Arrays.toString(rowSeqs.get(start).getKey()));
+    LOG.debug("Storing key (FO): " + Arrays.toString(rowSeqs.get(start).getKey()) + " - " + time + "  " + startTimeToFragmentOrder(time));
     key = Base64.getEncoder().encodeToString(rowSeqs.get(start).getKey());
     // Perform value
     ArrayList<byte[]> tmpValues = new ArrayList<byte[]>();
@@ -513,7 +536,7 @@ public class Cache {
     long result;
     byte[] tmp = new byte[(int)len];
     byte[] long_tmp = {0,0,0,0};
-    LOG.debug(start + " - " + Arrays.toString(bytes) + " " + len);
+//    LOG.debug(start + " - " + Arrays.toString(bytes) + " " + len);
     System.arraycopy(bytes, (int)start, tmp, 0, (int)len);
     // 1 , 5A
     int j = long_tmp.length - 1;

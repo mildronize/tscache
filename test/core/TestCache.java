@@ -57,18 +57,10 @@ public final class TestCache extends BaseTsdbTest {
      */
 
     Cache c = new Cache(tsdb, 2);
-    assertEquals(0, c.startTimeToFragmentOrder(0));
+    assertEquals(1, c.startTimeToFragmentOrder(0));
     assertEquals(1, c.startTimeToFragmentOrder(3600000));
     assertEquals(1, c.startTimeToFragmentOrder(7199000));
-    assertEquals(1, c.startTimeToFragmentOrder(7200000));
-    assertEquals(2, c.startTimeToFragmentOrder(7200001));
-    assertEquals(2, c.startTimeToFragmentOrder(7201000));
-    assertEquals(2, c.startTimeToFragmentOrder(14400000));
-  }
-
-  @Test
-  public void fragmentOrderToStartTime(){
-    Cache c = new Cache(tsdb, 2);
+    assertEquals(2, c.startTimeToFragmentOrder(7200000));
     assertEquals(0, c.fragmentOrderToStartTime(0));
     assertEquals(7200000, c.fragmentOrderToStartTime(1));
     assertEquals(14400000, c.fragmentOrderToStartTime(2));
@@ -77,25 +69,25 @@ public final class TestCache extends BaseTsdbTest {
   @Test
   public void endTimeToFragmentOrder(){
     /*
-            0 -  7199 999 -> FO = -1 // no ending fo, no need to cache
-     7200 000 - 14399 999 -> FO = 0
-    14400 000 - 21599 999 -> FO = 1
-    21600 000 - 28799 999 -> FO = 2
+            0 -  7199 999 -> FO = 0
+     7200 000 - 14399 999 -> FO = 1
+    14400 000 - 21599 999 -> FO = 2
+    21600 000 - 28799 999 -> FO = 3
      */
 
     Cache c = new Cache(tsdb, 2);
-    assertEquals(-1, c.endTimeToFragmentOrder(0));
-    assertEquals(-1, c.endTimeToFragmentOrder(3600000));
-    assertEquals(-1, c.endTimeToFragmentOrder(7199000));
-    assertEquals(-1, c.endTimeToFragmentOrder(7199999));
-    assertEquals(0, c.endTimeToFragmentOrder(7200000));
-    assertEquals(0, c.endTimeToFragmentOrder(14399000));
-    assertEquals(0, c.endTimeToFragmentOrder(14399999));
-    assertEquals(1, c.endTimeToFragmentOrder(14400000));
-    assertEquals(1, c.endTimeToFragmentOrder(21599000));
-    assertEquals(1, c.endTimeToFragmentOrder(21599999));
-    assertEquals(2, c.endTimeToFragmentOrder(21600000));
-    assertEquals(2, c.endTimeToFragmentOrder(28799999));
+    assertEquals(0, c.endTimeToFragmentOrder(0));
+    assertEquals(0, c.endTimeToFragmentOrder(3600000));
+    assertEquals(0, c.endTimeToFragmentOrder(7199000));
+    assertEquals(0, c.endTimeToFragmentOrder(7199999));
+    assertEquals(1, c.endTimeToFragmentOrder(7200000));
+    assertEquals(1, c.endTimeToFragmentOrder(14399000));
+    assertEquals(1, c.endTimeToFragmentOrder(14399999));
+    assertEquals(2, c.endTimeToFragmentOrder(14400000));
+    assertEquals(2, c.endTimeToFragmentOrder(21599000));
+    assertEquals(2, c.endTimeToFragmentOrder(21599999));
+    assertEquals(3, c.endTimeToFragmentOrder(21600000));
+    assertEquals(3, c.endTimeToFragmentOrder(28799999));
   }
 
   @Test

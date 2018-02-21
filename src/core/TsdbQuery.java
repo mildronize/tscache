@@ -624,6 +624,7 @@ import net.opentsdb.utils.DateTime;
         "Can't build key of cache");
     }
     result_key = Base64.getDecoder().decode(keys.get(0));
+
     for (final String key: keys){
       deferreds.add(tsdb.cache.getMemcachedAsync(memcachedClient,key));
     }
@@ -744,7 +745,7 @@ import net.opentsdb.utils.DateTime;
     class ErrorCB implements Callback<Object, Exception> {
       public Object call(final Exception e) throws Exception {
         throw new BadRequestException(HttpResponseStatus.BAD_REQUEST,
-          e.getMessage(), "Can't get data", e);
+            e.getMessage(), "Can't get data", e);
       }
     }
 
