@@ -20,6 +20,17 @@ final class CacheFragment {
   private long endTime;
   private boolean cacheState;
 
+  public void setFailed(boolean failed) {
+    this.failed = failed;
+  }
+
+  public boolean isFailed() {
+    return failed;
+  }
+
+  // state of cache retrieval, default false
+  private boolean failed = false;
+
   public CacheFragment(long startTime, long endTime, boolean cacheState) {
     this.startTime = startTime;
     this.endTime = endTime;

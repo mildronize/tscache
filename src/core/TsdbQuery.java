@@ -533,7 +533,7 @@ import net.opentsdb.utils.DateTime;
     return tsdbQuery;
   }
 
-  public Deferred<TreeMap<byte[], Span>> findCache(CacheFragment fragment){
+  public Deferred<TreeMap<byte[], Span>> findCache(final CacheFragment fragment){
     // finally the result is one object!
     final ArrayList<Deferred<byte[]>> deferreds = new ArrayList<Deferred<byte[]>>();
     final byte[] result_key;
@@ -631,7 +631,7 @@ import net.opentsdb.utils.DateTime;
 
     class GroupFinished implements Callback<TreeMap<byte[], Span>, ArrayList<byte[]>> {
       @Override
-      public TreeMap<byte[], Span> call(final ArrayList<byte[]> raw_results) {
+      public TreeMap<byte[], Span> call(final ArrayList<byte[]> raw_results) throws Exception{
         // merge each TreeMap together
         final short metric_width = tsdb.metrics.width();
         final TreeMap<byte[], Span> result_spans = // The key is a row key from HBase.
@@ -639,6 +639,9 @@ import net.opentsdb.utils.DateTime;
             (short)(Const.SALT_WIDTH() + metric_width)));
         LOG.debug("findSpan -> GroupFinished: Span size: " + raw_results.size());
         for(final byte[] result: raw_results){
+          if(result == null){
+            throw new Exception("Get null data");
+          }
           LOG.debug("Raw of Cache: " + Arrays.toString(result));
         }
         result_spans.put(result_key, tsdb.cache.deserializeToSpan(raw_results));
@@ -648,12 +651,18 @@ import net.opentsdb.utils.DateTime;
 
     }
 
-    class ErrorCB implements Callback<Object, Exception> {
-      public Object call(final Exception e) throws Exception {
-        // TODO: forward action to findSpan
+    final TsdbQuery self = this;
+
+    class ErrorCB implements Callback<Deferred<TreeMap<byte[], Span>>, Exception> {
+      public Deferred<TreeMap<byte[], Span>> call(final Exception e) throws Exception {
         memcachedClient.shutdown();
-        throw new BadRequestException(HttpResponseStatus.BAD_REQUEST,
-          e.getMessage(), "Can't get data", e);
+        fragment.setFailed(true);
+        // forward action to findSpan
+        LOG.debug("Can't get data from Memcached, forward action to findSpan!");
+        TsdbQuery fragmentTsdbQuery = self.duplicate();
+        fragmentTsdbQuery.setStartTime(fragment.getStartTime());
+        fragmentTsdbQuery.setEndTime(fragment.getEndTime());
+        return fragmentTsdbQuery.findSpans();
       }
     }
 
@@ -723,7 +732,7 @@ import net.opentsdb.utils.DateTime;
         final ArrayList<Deferred<Boolean>> deferreds = new ArrayList<Deferred<Boolean>>();
 
         for (int i = 0; i < spans.size(); i++) {
-          if (!cacheFragments.get(i).isInCache()) {  // true in cache
+          if (!cacheFragments.get(i).isInCache() || cacheFragments.get(i).isFailed()) {  // true in cache
             // store in memcached
             LOG.debug("starting store cache fragment");
             deferreds.add(tsdb.cache.storeCache(cacheFragments.get(i), spans.get(i)));
@@ -733,8 +742,7 @@ import net.opentsdb.utils.DateTime;
         try {
           Deferred.groupInOrder(deferreds).join();
         } catch (Exception e) {
-          throw new BadRequestException(HttpResponseStatus.BAD_REQUEST,
-            e.getMessage(), "Store cached error", e);
+          LOG.warn("Can't store cached fragment, ignore storing to cache");
         }
         // and by pass the result to next callback
         return spans;
