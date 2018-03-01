@@ -56,7 +56,7 @@ public class Cache {
 
   private final String memcachedHost = "memcached";
   private final int memcachedPort = 11211;
-  private final int memcachedExpiredTime = 20;
+  private final int memcachedExpiredTime = 0;
   private final int memcachedVerifyingTime = 1;
 
   public Cache(TSDB tsdb) {
