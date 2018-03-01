@@ -368,9 +368,13 @@ public class Cache {
       int start_rowSeq = 0;
       // First span only for defining starting fragment order
       if (spanCount == 0){
+        if (rowSeqs.size() < numRangeSize){
+          LOG.debug("storeCache: rowSeqs size is too small, ignore cache");
+          return Deferred.fromResult(true);
+        }
         start_rowSeq = findStartRowSeq(rowSeqs, startTime_fo);
         if (start_rowSeq < 0 ){
-          String msg = "Can't find starting rowSeq fragment order";
+          String msg = "storeCache: Can't find starting rowSeq fragment order";
           LOG.error(msg);
           return Deferred.fromError(new Exception(msg));
         }
