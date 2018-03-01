@@ -203,9 +203,9 @@ public class Cache {
 
     }
 
-    LOG.debug("List of CacheFragment:");
+    LOG.debug("buildCacheFragments: List of CacheFragment:");
     for(final CacheFragment cf: cacheFragments){
-      LOG.debug(cf.toString());
+      LOG.debug("buildCacheFragments: " + cf.toString());
     }
 
     return cacheFragments;
@@ -284,17 +284,17 @@ public class Cache {
     return ( fragmentOrder + 1 ) * numRangeSize * HBaseRowPeriodMs - 1;
   }
 
-  public int findStartRowSeq(ArrayList<RowSeq> rowSeqs, long startTime_fo){
-    LOG.debug("start findStartRowSeq");
-    LOG.debug(startTime_fo+"");
+  public int findStartRowSeq(ArrayList<RowSeq> rowSeqs, long startTime){
+    LOG.debug("findStartRowSeq: Finding (" + startTime+") in rowSeqs, for finding start point of the fragment(group of rowSeq)");
     int i;
     for ( i = 0; i < rowSeqs.size(); i++) {
       long baseTime = rowSeqs.get(i).baseTime() * 1000; // convert to milliseconds
-      LOG.debug(baseTime + " | " + rowSeqs.get(i));
 //      LOG.debug(baseTime + " >= " + startTime_fo + " AND " + baseTime + " < " + (startTime_fo + HBaseRowPeriod*numRangeSize));
-      if (baseTime >= startTime_fo && baseTime < ( startTime_fo + HBaseRowPeriod*numRangeSize ) ){
+      if (baseTime >= startTime && baseTime < ( startTime + HBaseRowPeriodMs * numRangeSize ) ){
+        LOG.debug("findStartRowSeq: the result : " + i);
         return i;
       }
+      LOG.debug("findStartRowSeq: " + baseTime + " is not in between " + startTime + " - " + (startTime + HBaseRowPeriodMs * numRangeSize) + " | RowSeq: " + rowSeqs.get(i).size() + " datapoints");
     }
     return -1;
   }
@@ -309,7 +309,7 @@ public class Cache {
 //    LOG.debug("setMemcachedAsync client ready ");
     String key = item.entrySet().iterator().next().getKey();
     byte[] value = item.entrySet().iterator().next().getValue();
-    LOG.debug("setMemcachedAsync data: ("+ key +") | " + Arrays.toString(value));
+    LOG.debug("setMemcachedAsync data: ("+ key +") | " + value.length + " btyes");
     OperationFuture<Boolean> future = client.set(key, memcachedExpiredTime, value);
 
 //    LOG.debug("setMemcachedAsync set!");
@@ -339,7 +339,7 @@ public class Cache {
     }catch(IOException e){
       return Deferred.fromError(e);
     }
-    LOG.debug("Connected to memcached server");
+    LOG.debug("storeCache: Connected to memcached server");
 
     long startTime = fragment.getStartTime();
     long endTime = fragment.getEndTime();
@@ -351,7 +351,7 @@ public class Cache {
 //    long endTime_fo = fragmentOrderToEndTime(end_fo);
     // a result (TreeMap<byte[], Span>) can be more than one
 
-    LOG.debug(start_fo + " " + end_fo + " " + startTime_fo);
+    LOG.debug("storeCache: start_fo:" +start_fo + " end_fo: " + end_fo + " startTime: " + startTime_fo);
     // The number of rest of RowSeq in previous Span
     int remainingRowSeq = 0;
 
@@ -359,11 +359,11 @@ public class Cache {
     ArrayList<RowSeq> restRowSeq = null;
     int spanCount = 0;
     for(Map.Entry<byte[], Span> entry : spans.entrySet()) {
-      LOG.debug("Span " + (spanCount + 1));
+      LOG.debug("storeCache: Span " + (spanCount + 1));
       // Group row key
       Span span = entry.getValue();  // ignore the key
       ArrayList<RowSeq> rowSeqs = span.getRows();
-      LOG.debug("get rowSeqs size: " + rowSeqs.size());
+      LOG.debug("storeCache: get rowSeqs size: " + rowSeqs.size());
       int i;
       int start_rowSeq = 0;
       // First span only for defining starting fragment order
@@ -374,8 +374,7 @@ public class Cache {
           LOG.error(msg);
           return Deferred.fromError(new Exception(msg));
         }
-        LOG.debug("start_rowSeq index: " + start_rowSeq);
-        LOG.debug("Finish findStartRowSeq");
+//        LOG.debug("Finish findStartRowSeq");
       } else if (remainingRowSeq > 0 ){
         // This condition will happen on up to 2 spans only
         // if it remain some rowSeq in previous Span, merge `restRowSeq` and rowSeq of this Span
@@ -403,18 +402,18 @@ public class Cache {
           LOG.error(e.getMessage());
           return Deferred.fromError(e);
         }
-        LOG.debug("RowSeq index("+i+") : "+ item.entrySet().iterator().next().getKey());
+        LOG.debug("storeCache: RowSeq index("+i+") : "+ item.entrySet().iterator().next().getKey());
         // send `item` to cache
         deferreds.add(setMemcached(memcachedClient, item));
       }
       remainingRowSeq = rowSeqs.size() - i;
-      LOG.debug("remainingRowSeq = "+remainingRowSeq);
+      LOG.debug("storeCache: remainingRowSeq = "+remainingRowSeq);
       if (remainingRowSeq > 0 ){
         // copy the rest of this rowseq into `restRowSeq`
         try {
           int start_remainingRowSeq = i - numRangeSize;
           start_remainingRowSeq = start_remainingRowSeq < 0 ?0:start_remainingRowSeq;
-          LOG.debug(rowSeqs.size() + " " + (start_remainingRowSeq) + " " + (rowSeqs.size()));
+          LOG.debug("storeCache: rowSeqs.size():" + rowSeqs.size() + " start_remainingRowSeq: " + (start_remainingRowSeq));
           restRowSeq = new ArrayList<RowSeq>(rowSeqs.subList(start_remainingRowSeq, rowSeqs.size()));
         }catch (IndexOutOfBoundsException e){
           return Deferred.fromError(e);
@@ -431,8 +430,8 @@ public class Cache {
       @Override
       public Boolean call(final ArrayList<Boolean> result) {
         memcachedClient.shutdown();
+        LOG.debug("storeCache.UpdateCacheCB.call: memcachedClient.shutdown");
         lookupTable.mark(start_fo, result.size());
-        LOG.debug("UpdateCacheCB");
         return true;
       }
     }
@@ -512,7 +511,7 @@ public class Cache {
     // debug
     long time = Bytes.getUnsignedInt(rowSeqs.get(start).getKey(), Const.SALT_WIDTH() + tsdb.metrics.width()) * 1000;
 //    LOG.debug("Storing Key: " + Arrays.toString(rowSeqs.get(start).getKey()));
-    LOG.debug("Storing key (FO): " + Arrays.toString(rowSeqs.get(start).getKey()) + " - " + time + "  " + startTimeToFragmentOrder(time));
+    LOG.debug("serializeRowSeq: Storing key : " + Arrays.toString(rowSeqs.get(start).getKey()) + " Timestamp: " + time + " FragmentOrder: " + startTimeToFragmentOrder(time));
     key = Base64.getEncoder().encodeToString(rowSeqs.get(start).getKey());
     // Perform value
     ArrayList<byte[]> tmpValues = new ArrayList<byte[]>();
@@ -572,7 +571,7 @@ public class Cache {
     long valuesLength = getNumberBytesRange(bytes, cursor, ROWSEQ_VALUE_NUMBYTES);
     cursor +=  ROWSEQ_VALUE_NUMBYTES;
     values = new byte[(int)valuesLength];
-    LOG.debug(Arrays.toString(bytes) + " " + cursor + "  " + Arrays.toString(values) + " " + valuesLength);
+    //LOG.debug(Arrays.toString(bytes) + " " + cursor + "  " + Arrays.toString(values) + " " + valuesLength);
     System.arraycopy(bytes, (int)cursor, values, 0, (int)valuesLength);
     cursor += valuesLength;
 

@@ -580,12 +580,12 @@ import net.opentsdb.utils.DateTime;
     if (filters != null) {
       for (final TagVFilter filter : filters) {
         // Default true, set to false in finsSpan method only
-        LOG.debug("FILTER: " + filter.toString());
-        LOG.debug("FILTER: postScan" + filter.postScan());
-        LOG.debug("FILTER: type?" + (filter.getType() == "literal_or"));
+//        LOG.debug("FILTER: " + filter.toString());
+//        LOG.debug("FILTER: postScan" + filter.postScan());
+//        LOG.debug("FILTER: type?" + (filter.getType() == "literal_or"));
         // TODO: postScan, recheck of postScan is needed to use?
         if (filter.getType() == "literal_or") {
-          LOG.debug("OK FILTER: " + filter.toString());
+          LOG.debug("findCache: OK FILTER: " + filter.toString());
           byte[] key_tmp = filter.getTagkBytes();
           List<byte[]> tagVUids = filter.getTagVUids();
           if(tagVUids.size() != 1){
@@ -607,15 +607,15 @@ import net.opentsdb.utils.DateTime;
       return Deferred.fromError(new Exception("Tags should be defined!"));
     }
     byte[] keyBytesTemplate = new byte[metric_bytes + Const.TIMESTAMP_BYTES + tags.length];
-    LOG.debug("keyBytesTemplate: " + Arrays.toString(keyBytesTemplate));
+    LOG.debug("findCache: keyBytesTemplate: " + Arrays.toString(keyBytesTemplate));
     // add key byte
-    LOG.debug("Add metric into template: " + Arrays.toString(metric));
+    LOG.debug("findCache: Add metric into template: " + Arrays.toString(metric));
     System.arraycopy(metric, 0, keyBytesTemplate, 0 , metric_bytes);
-    LOG.debug("keyBytesTemplate: " + Arrays.toString(keyBytesTemplate));
+    LOG.debug("findCache: keyBytesTemplate: " + Arrays.toString(keyBytesTemplate));
     // add tag byte
-    LOG.debug("Add tags into template: " + Arrays.toString(tags));
+    LOG.debug("findCache: Add tags into template: " + Arrays.toString(tags));
     System.arraycopy(tags, 0, keyBytesTemplate, metric_bytes + Const.TIMESTAMP_BYTES , tags.length);
-    LOG.debug("keyBytesTemplate: " + Arrays.toString(keyBytesTemplate));
+    LOG.debug("findCache: keyBytesTemplate: " + Arrays.toString(keyBytesTemplate));
     ArrayList<String> keys = tsdb.cache.processKeyCache(fragment, keyBytesTemplate, metric_bytes);
     // Select first key of span as a key of the result
     if(keys.size() == 0){
@@ -637,12 +637,12 @@ import net.opentsdb.utils.DateTime;
         final TreeMap<byte[], Span> result_spans = // The key is a row key from HBase.
           new TreeMap<byte[], Span>(new SpanCmp(
             (short)(Const.SALT_WIDTH() + metric_width)));
-        LOG.debug("findSpan -> GroupFinished: Span size: " + raw_results.size());
+        LOG.debug("findCache.GroupFinisih.call:: Span size: " + raw_results.size());
         for(final byte[] result: raw_results){
           if(result == null){
             throw new Exception("Get null data");
           }
-          LOG.debug("Raw of Cache: " + Arrays.toString(result));
+          //LOG.debug("Raw of Cache: " + Arrays.toString(result));
         }
         result_spans.put(result_key, tsdb.cache.deserializeToSpan(raw_results));
         memcachedClient.shutdown();
@@ -658,7 +658,7 @@ import net.opentsdb.utils.DateTime;
         memcachedClient.shutdown();
         fragment.setFailed(true);
         // forward action to findSpan
-        LOG.debug("Can't get data from Memcached, forward action to findSpan!");
+        LOG.info("findCache.ErrorCB.call: Can't get data from Memcached, forward action to findSpan!");
         TsdbQuery fragmentTsdbQuery = self.duplicate();
         fragmentTsdbQuery.setStartTime(fragment.getStartTime());
         fragmentTsdbQuery.setEndTime(fragment.getEndTime());
@@ -697,7 +697,7 @@ import net.opentsdb.utils.DateTime;
           new TreeMap<byte[], Span>(new SpanCmp(
             (short)(Const.SALT_WIDTH() + metric_width)));
 
-        LOG.debug("Merge raw data -> GroupFinished: Span size: " + spans.size());
+        LOG.debug("buildFragmentAsync.GroupFinished.call: Merge raw data -> GroupFinished: Span size: " + spans.size());
         if(spans.size() <= 0)
           return result_spans;
         byte[] result_key = spans.get(0).entrySet().iterator().next().getKey();
@@ -705,7 +705,7 @@ import net.opentsdb.utils.DateTime;
         for(final TreeMap<byte[], Span> span : spans) {
 
           for (Map.Entry<byte[], Span> element : span.entrySet())
-            LOG.debug("Fragment (Span) : " + element.getKey() + "["+ Arrays.toString(element.getKey()) + "]| Value: " + element.getValue());
+            LOG.debug("buildFragmentAsync.GroupFinished.call: Fragment (Span) : " + element.getKey() + "["+ Arrays.toString(element.getKey()) + "]| Value: " + element.getValue().getRows().size() + " rows") ;
 
           for(Map.Entry<byte[], Span> entry : span.entrySet()) {
             result_span.addAll(entry.getValue().getRows());
@@ -715,7 +715,7 @@ import net.opentsdb.utils.DateTime;
         result_spans.put(result_key, result_span);
 
         for (Map.Entry<byte[], Span> element : result_spans.entrySet())
-          LOG.debug("Merged Span : " + element.getKey() + "["+ Arrays.toString(element.getKey()) + "]| Value: " + element.getValue());
+          LOG.debug("buildFragmentAsync.GroupFinished.call: Merged Span : " + element.getKey() + "["+ Arrays.toString(element.getKey()) + "]| Value: " + element.getValue().getRows().size() + " rows");
 
         return result_spans;
       }
@@ -734,7 +734,7 @@ import net.opentsdb.utils.DateTime;
         for (int i = 0; i < spans.size(); i++) {
           if (!cacheFragments.get(i).isInCache() || cacheFragments.get(i).isFailed()) {  // true in cache
             // store in memcached
-            LOG.debug("starting store cache fragment");
+            LOG.debug("buildFragmentAsync.StoreCB.call: starting store cache fragment");
             deferreds.add(tsdb.cache.storeCache(cacheFragments.get(i), spans.get(i)));
           }
         }
@@ -742,7 +742,7 @@ import net.opentsdb.utils.DateTime;
         try {
           Deferred.groupInOrder(deferreds).join();
         } catch (Exception e) {
-          LOG.warn("Can't store cached fragment, ignore storing to cache");
+          LOG.warn("buildFragmentAsync.StoreCB.call: Can't store cached fragment, ignore storing to cache");
         }
         // and by pass the result to next callback
         return spans;
@@ -1154,18 +1154,18 @@ import net.opentsdb.utils.DateTime;
 
       // Mildronize: Debug
       for (Map.Entry<byte[], Span> entry : spans.entrySet()) {
-        LOG.debug("Key: " + entry.getKey() + ". Value: " + entry.getValue());
+        LOG.debug("GroupByAndAggregateCB (Post-processing): Key: " + entry.getKey() + ". Value: " + entry.getValue().getRows().size() + " rows");
      }
 
-      for (final TagVFilter filter : filters) {
-        // Default true, set to false in finsSpan method only
-        LOG.debug(filter.toString());
-        LOG.debug(Arrays.toString(filter.getTagkBytes()));
-        List<byte[]> tagVUids = filter.getTagVUids();
-        for (final byte[] tagVUid: tagVUids){
-          LOG.debug(Arrays.toString(tagVUid));
-        }
-      }
+//      for (final TagVFilter filter : filters) {
+//        // Default true, set to false in finsSpan method only
+////        LOG.debug(filter.toString());
+////        LOG.debug(Arrays.toString(filter.getTagkBytes()));
+//        List<byte[]> tagVUids = filter.getTagVUids();
+//        for (final byte[] tagVUid: tagVUids){
+//          LOG.debug(Arrays.toString(tagVUid));
+//        }
+//      }
 
       if (query_stats != null) {
         query_stats.addStat(query_index, QueryStat.QUERY_SCAN_TIME, 
