@@ -232,7 +232,7 @@ public class CacheLookupTable {
     }
 
     //    Note: No head adding
-    LOG.debug("buildFragmentBit: Result:       " + printIndexes(result));
+    LOG.debug("buildFragmentBit: Result:     " + printIndexes(result));
     return result;
 
   }

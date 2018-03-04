@@ -11,7 +11,9 @@ import org.jboss.netty.handler.codec.http.HttpResponseStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.FileWriter;
 import java.io.IOException;
+import java.io.PrintWriter;
 import java.lang.reflect.Array;
 import java.net.InetSocketAddress;
 import java.util.*;
@@ -215,11 +217,17 @@ public class Cache {
   // findCache helper functions //
   // -------------------------- //
 
+  public String encodeKey(byte[] key) throws Exception{
+    return Base64.getEncoder().encodeToString(key);
+  }
 
+  public byte[] decodeKey(String key) throws Exception{
+    return Base64.getDecoder().decode(key);
+  }
 
-  public ArrayList<String> processKeyCache(CacheFragment fragment, byte[] keyBytesTemplate, short metric_bytes){
+  public ArrayList<byte[]> processKeyCache(CacheFragment fragment, byte[] keyBytesTemplate, short metric_bytes){
     // Generate a list of keys what to get from Memcached
-    ArrayList<String> result = new ArrayList<String>();
+    ArrayList<byte[]> result = new ArrayList<byte[]>();
     LOG.debug("Key Template: " + Arrays.toString(keyBytesTemplate));
     // get a list of Fragment order that to get
     // 1 fo = 1 key
@@ -252,8 +260,8 @@ public class Cache {
       Bytes.setInt(key, (int) base_time, metric_bytes);
 //      LOG.debug("Getting Key: " + Arrays.toString(key));
       long time = Bytes.getUnsignedInt(key, Const.SALT_WIDTH() + tsdb.metrics.width()) * 1000;
-      LOG.debug("Getting key (FO): " +Arrays.toString(key)+  " - " + time + "  " + timeToFragmentOrder(time));
-      result.add(Base64.getEncoder().encodeToString(key));
+      //LOG.debug("Getting key (FO): " +Arrays.toString(key)+  " - " + time + "  " + timeToFragmentOrder(time));
+      result.add(key);
     }
     return result;
   }
@@ -310,6 +318,7 @@ public class Cache {
     String key = item.entrySet().iterator().next().getKey();
     byte[] value = item.entrySet().iterator().next().getValue();
     LOG.debug("setMemcachedAsync data: ("+ key +") | " + value.length + " btyes");
+
     OperationFuture<Boolean> future = client.set(key, memcachedExpiredTime, value);
 
 //    LOG.debug("setMemcachedAsync set!");
@@ -329,6 +338,16 @@ public class Cache {
   }
 
   public Deferred<Boolean> storeCache(CacheFragment fragment, TreeMap<byte[], Span> spans){
+    // mildronize: debug
+//    final FileWriter fileWriter;
+//    final PrintWriter printWriter;
+//    try {
+//      fileWriter = new FileWriter("/var/log/opentsdb/store." + System.currentTimeMillis());
+//      printWriter = new PrintWriter(fileWriter);
+//    }catch (Exception e){
+//      return Deferred.fromError(e);
+//    }
+
     // save to memached
     // find fragment order of start & end time
     final ArrayList<Deferred<Boolean>> deferreds = new ArrayList<Deferred<Boolean>>();
@@ -394,6 +413,10 @@ public class Cache {
         }
         // send `item` to cache
         deferreds.add(setMemcached(memcachedClient, item));
+        // mildronize: debug
+        //String key = item.entrySet().iterator().next().getKey();
+        //byte[] value = item.entrySet().iterator().next().getValue();
+        //printWriter.println(key+"#("+value.length +")#"+ Arrays.toString(value) +"$");
       }
 
       // TODO: bottleneck processing
@@ -409,6 +432,10 @@ public class Cache {
         LOG.debug("storeCache: RowSeq index("+i+") : "+ item.entrySet().iterator().next().getKey());
         // send `item` to cache
         deferreds.add(setMemcached(memcachedClient, item));
+        // mildronize: debug
+        //String key = item.entrySet().iterator().next().getKey();
+        //byte[] value = item.entrySet().iterator().next().getValue();
+        //printWriter.println(key+"#("+value.length +")#"+ Arrays.toString(value) +"$");
       }
       remainingRowSeq = rowSeqs.size() - i;
       LOG.debug("storeCache: remainingRowSeq = "+remainingRowSeq);
@@ -434,11 +461,13 @@ public class Cache {
       @Override
       public Boolean call(final ArrayList<Boolean> result) {
         memcachedClient.shutdown();
+        //printWriter.close();
         LOG.debug("storeCache.UpdateCacheCB.call: memcachedClient.shutdown");
         lookupTable.mark(start_fo, result.size());
         return true;
       }
     }
+
     return Deferred.group(deferreds).addCallback(new UpdateCacheCB());
   }
 
@@ -516,7 +545,7 @@ public class Cache {
     long time = Bytes.getUnsignedInt(rowSeqs.get(start).getKey(), Const.SALT_WIDTH() + tsdb.metrics.width()) * 1000;
 //    LOG.debug("Storing Key: " + Arrays.toString(rowSeqs.get(start).getKey()));
     LOG.debug("serializeRowSeq: Storing key : " + Arrays.toString(rowSeqs.get(start).getKey()) + " Timestamp: " + time + " FragmentOrder: " + startTimeToFragmentOrder(time));
-    key = Base64.getEncoder().encodeToString(rowSeqs.get(start).getKey());
+    key = encodeKey(rowSeqs.get(start).getKey());
     // Perform value
     ArrayList<byte[]> tmpValues = new ArrayList<byte[]>();
     // Add Number of Span
