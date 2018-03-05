@@ -174,7 +174,7 @@ public class CacheLookupTable {
   }
 
   public String printIndexes(ArrayList<Long> indexes, int startBlockOrder, int endBlockOrder) {
-    LOG.debug("printIndexes: [ " +startBlockOrder+ " , "+ endBlockOrder+ " ]");
+    LOG.info("printIndexes: [ " +startBlockOrder+ " , "+ endBlockOrder+ " ]");
     final StringBuilder buf = new StringBuilder(indexes.size() * (1 + 64));
     for(int i = startBlockOrder; i<= endBlockOrder; i++){
       buf.append(String.format("%64s", Long.toBinaryString(indexes.get(i))).replace(' ', '0'));
@@ -189,8 +189,8 @@ public class CacheLookupTable {
 
   public ArrayList<Long> findCachedBits(ArrayList<Long> queryIndexes, int startBlockOrder, int endBlockOrder){
     ArrayList<Long> result = new ArrayList<Long>();
-    LOG.debug("findCachedBits: QueryIndexes: " + printIndexes(queryIndexes, startBlockOrder, endBlockOrder));
-    LOG.debug("findCachedBits: CacheIndexes: " + printIndexes(cacheIndexes, startBlockOrder, endBlockOrder));
+    LOG.info("findCachedBits: QueryIndexes: " + printIndexes(queryIndexes, startBlockOrder, endBlockOrder));
+    LOG.info("findCachedBits: CacheIndexes: " + printIndexes(cacheIndexes, startBlockOrder, endBlockOrder));
     for (int i = startBlockOrder ; i <= endBlockOrder; i++ ){
       LOG.debug("findCachedBits: QueryBlockOrder: " + i);
       result.add(new Long(

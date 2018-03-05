@@ -1184,16 +1184,18 @@ import net.opentsdb.utils.DateTime;
     public DataPoints[] call(final TreeMap<byte[], Span> spans) throws Exception {
 
       // Mildronize: Debug
-//      FileWriter fileWriter = new FileWriter("/var/log/opentsdb/RowSeq." + System.currentTimeMillis());
-//      PrintWriter printWriter = new PrintWriter(fileWriter);
+      FileWriter fileWriter = new FileWriter("/var/log/opentsdb/RowSeq." + System.currentTimeMillis());
+      PrintWriter printWriter = new PrintWriter(fileWriter);
       for (Map.Entry<byte[], Span> entry : spans.entrySet()) {
         LOG.debug("GroupByAndAggregateCB (Post-processing): Key: " + entry.getKey() + ". Value: " + entry.getValue().getRows().size() + " rows");
-//        check_duplicate_row(entry.getValue().getRows());
-//        for (final RowSeq rowSeq: entry.getValue().getRows()) {
-//          printWriter.printf(rowSeq.toString());
-//        }
+        check_duplicate_row(entry.getValue().getRows());
+        for (final RowSeq rowSeq: entry.getValue().getRows()) {
+          String msg = Arrays.toString(rowSeq.getKey()) + " Value: " + Arrays.toString(rowSeq.getValues())+ " Qualifier: " + Arrays.toString(rowSeq.getQualifiers())+ " $";
+          printWriter.println(msg);
+          LOG.debug(msg);
+        }
      }
-//      printWriter.close();
+      printWriter.close();
 
 
 //      for (final TagVFilter filter : filters) {

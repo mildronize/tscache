@@ -205,9 +205,9 @@ public class Cache {
 
     }
 
-    LOG.debug("buildCacheFragments: List of CacheFragment:");
+    LOG.info("buildCacheFragments: List of CacheFragment:");
     for(final CacheFragment cf: cacheFragments){
-      LOG.debug("buildCacheFragments: " + cf.toString());
+      LOG.info("buildCacheFragments: " + cf.toString());
     }
 
     return cacheFragments;
@@ -550,14 +550,47 @@ public class Cache {
     ArrayList<byte[]> tmpValues = new ArrayList<byte[]>();
     // Add Number of Span
     int end = start + length;
+    Span span_tmp = new Span(tsdb);
     for(int i = start; i< end; i++) {
       byte[] tmp = generateRowSeqBytes(rowSeqs.get(i));
       tmpValues.add(numberToBytes(tmp.length, ROWSEQ_LENGTH_NUMBYTES));
       tmpValues.add(tmp);
+      span_tmp.addRowSeq(rowSeqs.get(i));
     }
     byte[] value = arrayListToBytes(tmpValues);
+    // deserialize check
+    Span exceptedSpan = bytesRangeToSpan(value, 0);
+
+    if (isSpanEqual(span_tmp, exceptedSpan)){
+      LOG.info("serialize and deserialize are correct");
+    }else
+      LOG.error("serialize and deserialize are incorrect!");
+
     result.put(key, value);
     return result;
+  }
+
+  private boolean isRowSeqEqual(RowSeq a, RowSeq b){
+    if(!Arrays.equals(a.getKey(), b.getKey()))
+      return false;
+    if(!Arrays.equals(a.getValues(), b.getValues()))
+      return false;
+    if(!Arrays.equals(a.getQualifiers(), b.getQualifiers()))
+      return false;
+    return true;
+  }
+
+  private boolean isSpanEqual(Span a, Span b){
+    if (a.getRows().size() != b.getRows().size())
+      return false;
+    ArrayList<RowSeq> a_rows = a.getRows();
+    ArrayList<RowSeq> b_rows = b.getRows();
+    for (int i =0; i < a_rows.size();i++){
+      if (!isRowSeqEqual(a_rows.get(i), b_rows.get(i))){
+        return false;
+      }
+    }
+    return true;
   }
 
   // ---------------------------- //
@@ -586,6 +619,7 @@ public class Cache {
     byte[] values;
     // Get key
     long keyLength = getNumberBytesRange(bytes, cursor, ROWSEQ_KEY_NUMBYTES);
+    LOG.debug("bytesRangeToRowSeq: " + cursor + " - " + Arrays.toString(Arrays.copyOfRange(bytes, (int)cursor, (int)(cursor+ROWSEQ_KEY_NUMBYTES))) + " " + ROWSEQ_KEY_NUMBYTES + " key Len:  " + keyLength);
     cursor += ROWSEQ_KEY_NUMBYTES;
     key = new byte[(int)keyLength];
     System.arraycopy(bytes, (int)cursor, key, 0, (int)keyLength);
