@@ -192,7 +192,7 @@ public class CacheLookupTable {
     LOG.info("findCachedBits: QueryIndexes: " + printIndexes(queryIndexes, startBlockOrder, endBlockOrder));
     LOG.info("findCachedBits: CacheIndexes: " + printIndexes(cacheIndexes, startBlockOrder, endBlockOrder));
     for (int i = startBlockOrder ; i <= endBlockOrder; i++ ){
-      LOG.debug("findCachedBits: QueryBlockOrder: " + i);
+//      LOG.debug("findCachedBits: QueryBlockOrder: " + i);
       result.add(new Long(
         queryIndexes.get(i).longValue()
           ^ cacheIndexes.get(i).longValue()

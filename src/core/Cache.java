@@ -16,6 +16,9 @@ import java.io.IOException;
 import java.io.PrintWriter;
 import java.lang.reflect.Array;
 import java.net.InetSocketAddress;
+import java.nio.BufferOverflowException;
+import java.nio.BufferUnderflowException;
+import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 
@@ -49,12 +52,12 @@ public class Cache {
   public static final short spanCount_numBytes = 2; // numBytes of number of Span
   public static final short spanLength_numBytes = 4; // numBytes of Span
   public static final short rowSeqCount_numBytes = 2;
-  public static final short ROWSEQ_LENGTH_NUMBYTES = 4;
-  public static final short ROWSEQ_KEY_NUMBYTES = 1;
-  public static final short ROWSEQ_QUALIFIER_NUMBYTES = 2;
-  public static final short ROWSEQ_VALUE_NUMBYTES = 2;
+  public static final short ROWSEQ_LENGTH_NUMBYTES = 4;  // int
+  public static final short ROWSEQ_KEY_NUMBYTES = 1; // byte
+  public static final short ROWSEQ_QUALIFIER_NUMBYTES = 2; //short
+  public static final short ROWSEQ_VALUE_NUMBYTES = 2; //short
 
-  private static final short NUM_RANGE_SIZE = 2;
+  private static final short NUM_RANGE_SIZE = 16;
 
   private final String memcachedHost = "memcached";
   private final int memcachedPort = 11211;
@@ -62,19 +65,32 @@ public class Cache {
   private final int memcachedVerifyingTime = 1;
 
   public Cache(TSDB tsdb) {
-    LOG.debug("Create Cache object");
+    LOG.info("Create Cache object");
     this.tsdb = tsdb;
-    this.numRangeSize = NUM_RANGE_SIZE;
+    modifyNumRangeSize(NUM_RANGE_SIZE);
     lookupTable = new CacheLookupTable();
+    //LOG.info("Create Cache object with numRangeSize = " + numRangeSize);
   }
 
   public Cache(TSDB tsdb, int numRangeSize) {
     this(tsdb);
+    modifyNumRangeSize(NUM_RANGE_SIZE);
+  }
+
+  public void modifyNumRangeSize(short numRangeSize){
     this.numRangeSize = numRangeSize;
+    LOG.warn("num of range size (Cache) is changed: " + numRangeSize);
   }
 
   public void dropCaches(){
     lookupTable = new CacheLookupTable();
+//    final MemcachedClient memcachedClient;
+//    try {
+//      memcachedClient = createMemcachedConnection();
+//    }catch(IOException e){
+//
+//    }
+//    LOG.debug("dropCaches: Connected to memcached server");
   }
 
   // ----- buildCacheFragments Helper -------
@@ -122,7 +138,7 @@ public class Cache {
           currentFO = (i + startQueryBlockOrder) * indexSize + ( j - 1 );
 //          currentFO = i*indexSize + ( j - 1 ) + startQueryBlockOrder;
           endTime_cacheFragment = fragmentOrderToEndTime(currentFO);
-          LOG.debug("endTime_cacheFragment: "+ endTime_cacheFragment + " " + currentFO);
+//          LOG.debug("endTime_cacheFragment: "+ endTime_cacheFragment + " " + currentFO);
           fragments.add(new CacheFragment(startTime_cacheFragment, endTime_cacheFragment, currentCachedState));
           currentCachedState = !currentCachedState; // toggle state
           startTime_cacheFragment = fragmentOrderToStartTime(currentFO + 1); // next Fragment order
@@ -162,7 +178,7 @@ public class Cache {
       try {
         cacheFragments = buildCacheFragmentsFromBits(results, start_fo, end_fo, lookupTable.getIndexSize());
       }catch(Exception e){
-        LOG.error(e.getMessage());
+        LOG.error("buildCacheFragments: " + e.getMessage());
         return null;
       }
 
@@ -311,13 +327,13 @@ public class Cache {
 //    LOG.debug("setMemcachedAsync start");
     if (client == null) {
       String msg = "MemcachedClient object is null";
-      LOG.error(msg);
+      LOG.error("setMemcached: " + msg);
       return Deferred.fromError(new Exception(msg));
     }
 //    LOG.debug("setMemcachedAsync client ready ");
     String key = item.entrySet().iterator().next().getKey();
     byte[] value = item.entrySet().iterator().next().getValue();
-    LOG.debug("setMemcachedAsync data: ("+ key +") | " + value.length + " btyes");
+//    LOG.debug("setMemcachedAsync data: ("+ key +") | " + value.length + " btyes");
 
     OperationFuture<Boolean> future = client.set(key, memcachedExpiredTime, value);
 
@@ -328,7 +344,7 @@ public class Cache {
       return Deferred.fromResult(future.get(memcachedVerifyingTime, TimeUnit.SECONDS));
     }catch (Exception e){
         String msg = "Failed to store value for key" + key + " : " + e.getMessage();
-        LOG.error(msg);
+        LOG.error("setMemcached: " + msg);
         return Deferred.fromError(new Exception(msg));
     }
   }
@@ -408,7 +424,7 @@ public class Cache {
         try {
           item = serializeRowSeq(tmp);
         }catch (Exception e){
-          LOG.error(e.getMessage());
+          LOG.error("storeCache: " + e.getMessage());
           return Deferred.fromError(e);
         }
         // send `item` to cache
@@ -426,8 +442,9 @@ public class Cache {
         try {
           item = serializeRowSeq(rowSeqs, i, numRangeSize);
         }catch (Exception e){
-          LOG.error(e.getMessage());
-          return Deferred.fromError(e);
+          LOG.error("storeCache: " + e.getMessage());
+          throw new BadRequestException(HttpResponseStatus.BAD_REQUEST,
+            "Can't serialize RowSeq into byte array: ");
         }
         LOG.debug("storeCache: RowSeq index("+i+") : "+ item.entrySet().iterator().next().getKey());
         // send `item` to cache
@@ -484,16 +501,34 @@ public class Cache {
   // Serialize helper functions //
   // -------------------------- //
 
-  private byte[] numberToBytes(int n, int numBytes) {
-    if (numBytes == 1) {
-      byte[] b = new byte[1];
-      b[0] = (byte) n;
-      return b;
-    } else if (numBytes == 2)
-      return Bytes.fromShort((short) n);
-    else if (numBytes == 4)
-      return Bytes.fromInt(n);
-    return null;
+//  public byte[] numberToBytes(int n, int numBytes) {
+//    if (numBytes == 1) {
+//      byte[] b = new byte[1];
+//      b[0] = (byte) n;
+//      return b;
+//    } else if (numBytes == 2)
+//      return Bytes.fromShort((short) n);
+//    else if (numBytes == 4)
+//      return Bytes.fromInt(n);
+//    return null;
+//  }
+  public byte[] numberToBytes(int n , int numBytes) throws Exception{
+    try {
+      ByteBuffer allocated = ByteBuffer.allocate(numBytes);
+      if (numBytes == 1)
+        return allocated.put((byte)n).array();
+      else if (numBytes == 2)
+        return allocated.putShort((short)n).array();
+      else if (numBytes == 4)
+        return allocated.putInt(n).array();
+    } catch( IllegalArgumentException e ) {
+      throw new IllegalArgumentException("numBytes must be positive integer" + Arrays.toString(e.getStackTrace()));
+    } catch( BufferOverflowException e ) {
+      throw new IllegalArgumentException("BufferOverflowException: Try to convert " + n + " in " + numBytes + " num bytes  " + Arrays.toString(e.getStackTrace()));
+    } catch( Exception e ) {
+      throw new Exception(e.getClass() + " " + Arrays.toString(e.getStackTrace()));
+    }
+    throw new Exception("Support byte conversion only: byte, short, long");
   }
 
   public byte[] arrayListToBytes(ArrayList<byte[]> bytes){
@@ -512,15 +547,15 @@ public class Cache {
     return value;
   }
 
-  private byte[] generateRowSeqBytes(RowSeq row){
+  private byte[] generateRowSeqBytes(RowSeq row) throws Exception{
     ArrayList<byte[]> tmpValues = new ArrayList<byte[]>();
 
-    tmpValues.add(numberToBytes(row.getKey().length, ROWSEQ_KEY_NUMBYTES));
-    tmpValues.add(row.getKey());
-    tmpValues.add(numberToBytes(row.getQualifiers().length, ROWSEQ_QUALIFIER_NUMBYTES));
-    tmpValues.add(row.getQualifiers());
-    tmpValues.add(numberToBytes(row.getValues().length, ROWSEQ_VALUE_NUMBYTES));
-    tmpValues.add(row.getValues());
+      tmpValues.add(numberToBytes(row.getKey().length, ROWSEQ_KEY_NUMBYTES));
+      tmpValues.add(row.getKey());
+      tmpValues.add(numberToBytes(row.getQualifiers().length, ROWSEQ_QUALIFIER_NUMBYTES));
+      tmpValues.add(row.getQualifiers());
+      tmpValues.add(numberToBytes(row.getValues().length, ROWSEQ_VALUE_NUMBYTES));
+      tmpValues.add(row.getValues());
 
     return arrayListToBytes(tmpValues);
   }
@@ -551,20 +586,30 @@ public class Cache {
     // Add Number of Span
     int end = start + length;
     Span span_tmp = new Span(tsdb);
+    LOG.debug("serializeRowSeq: Creating a group of RowSeq ( Size: " +length + ") " );
     for(int i = start; i< end; i++) {
+      LOG.debug("serializeRowSeq: Starting RowSeq("+ i +")");
       byte[] tmp = generateRowSeqBytes(rowSeqs.get(i));
-      tmpValues.add(numberToBytes(tmp.length, ROWSEQ_LENGTH_NUMBYTES));
+      byte[] lenByte = numberToBytes(tmp.length, ROWSEQ_LENGTH_NUMBYTES);
+      LOG.debug("Out: " + Arrays.toString(lenByte) + " num: " + tmp.length);
+      tmpValues.add(lenByte);
       tmpValues.add(tmp);
-      span_tmp.addRowSeq(rowSeqs.get(i));
+      LOG.debug("serializeRowSeq: RowSeq("+ i +")"  );
+      // For debug
+//      span_tmp.addRowSeq(rowSeqs.get(i));
     }
     byte[] value = arrayListToBytes(tmpValues);
     // deserialize check
-    Span exceptedSpan = bytesRangeToSpan(value, 0);
+    //Span exceptedSpan = bytesRangeToSpan(value, 0);
 
-    if (isSpanEqual(span_tmp, exceptedSpan)){
-      LOG.info("serialize and deserialize are correct");
-    }else
-      LOG.error("serialize and deserialize are incorrect!");
+//    if (isSpanEqual(span_tmp, exceptedSpan)){
+//      LOG.info("serialize and deserialize are correct");
+//    }else {
+//      LOG.error("serialize and deserialize are incorrect!");
+////      LOG.debug("serialize output: " + Arrays.toString(value));
+//      throw new BadRequestException(HttpResponseStatus.BAD_REQUEST,
+//        "serialize and deserialize are incorrect");
+//    }
 
     result.put(key, value);
     return result;
@@ -597,29 +642,47 @@ public class Cache {
   // Deserialize helper functions //
   // ---------------------------- //
 
-  public long getNumberBytesRange(byte[] bytes, long start, long len){
+  public long getNumberBytesRange(byte[] bytes, long start, long len) throws Exception{
     long result;
-    byte[] tmp = new byte[(int)len];
-    byte[] long_tmp = {0,0,0,0};
-//    LOG.debug(start + " - " + Arrays.toString(bytes) + " " + len);
-    System.arraycopy(bytes, (int)start, tmp, 0, (int)len);
-    // 1 , 5A
-    int j = long_tmp.length - 1;
-    for (int i = 0 ; i < tmp.length; i++){
-      long_tmp[j] = tmp[i];
+//    byte[] tmp = new byte[(int)len];
+//    byte[] long_tmp = {0,0,0,0};
+////    LOG.debug(start + " - " + Arrays.toString(bytes) + " " + len);
+//    System.arraycopy(bytes, (int)start, tmp, 0, (int)len);
+//    // 1 , 5A
+//    int j = long_tmp.length - 1;
+//    for (int i = 0 ; i < tmp.length; i++){
+//      long_tmp[j] = tmp[i];
+//    }
+//    result = Bytes.getUnsignedInt(long_tmp);
+
+//    byte[] newBytesArray = new byte[(int)len];
+//    System.arraycopy(bytes, (int)start, newBytesArray, 0, (int)len);
+    try {
+      ByteBuffer wrapped = ByteBuffer.wrap(bytes, (int)start, (int)len);
+      if (len == 1)
+        return wrapped.get();
+      else if (len == 2)
+        return  wrapped.getShort();
+      else if (len == 4)
+        return  wrapped.getInt();
+    } catch( IndexOutOfBoundsException  e ) {
+      throw new IndexOutOfBoundsException ( e.getMessage() + Arrays.toString(e.getStackTrace()));
+    } catch( BufferUnderflowException e ) {
+      throw new IllegalArgumentException("BufferUnderflowException: Try to convert " + len + " num bytes into number " + Arrays.toString(e.getStackTrace()));
+    } catch( Exception e ) {
+      throw new Exception(e.getClass() + " " + Arrays.toString(e.getStackTrace()));
     }
-    result = Bytes.getUnsignedInt(long_tmp);
-    return result;
+    throw new Exception("Support byte conversion only: byte, short, long");
   }
 
-  private RowSeq bytesRangeToRowSeq(byte[] bytes, long cursor) {
+  private RowSeq bytesRangeToRowSeq(byte[] bytes, long cursor) throws Exception{
     RowSeq rowSeq = new RowSeq(tsdb);
     byte[] key;
     byte[] qualifiers;
     byte[] values;
     // Get key
     long keyLength = getNumberBytesRange(bytes, cursor, ROWSEQ_KEY_NUMBYTES);
-    LOG.debug("bytesRangeToRowSeq: " + cursor + " - " + Arrays.toString(Arrays.copyOfRange(bytes, (int)cursor, (int)(cursor+ROWSEQ_KEY_NUMBYTES))) + " " + ROWSEQ_KEY_NUMBYTES + " key Len:  " + keyLength);
+//    LOG.debug("bytesRangeToRowSeq: " + cursor + " - " + Arrays.toString(Arrays.copyOfRange(bytes, (int)cursor, (int)(cursor+ROWSEQ_KEY_NUMBYTES))) + " " + ROWSEQ_KEY_NUMBYTES + " key Len:  " + keyLength);
     cursor += ROWSEQ_KEY_NUMBYTES;
     key = new byte[(int)keyLength];
     System.arraycopy(bytes, (int)cursor, key, 0, (int)keyLength);
@@ -646,7 +709,7 @@ public class Cache {
     return rowSeq;
   }
 
-  public Span bytesRangeToSpan(byte[] bytes, long cursor){
+  public Span bytesRangeToSpan(byte[] bytes, long cursor) throws Exception {
     Span span = new Span(tsdb);
 
     for (int i = 0; i < numRangeSize; i++) {
@@ -663,7 +726,7 @@ public class Cache {
 //    LOG.debug("getMemcacheAsync start");
     if (client == null) {
       String msg = "MemcachedClient object is null";
-      LOG.error(msg);
+      LOG.error("getMemcachedAsync: " + msg);
       return Deferred.fromError(new Exception(msg));
     }
 //    LOG.debug("getMemcacheAsync client ready ");
@@ -673,7 +736,7 @@ public class Cache {
       return Deferred.fromResult((byte[])future.get(memcachedVerifyingTime, TimeUnit.SECONDS));
     }catch (Exception e){
       String msg = "Failed to get value for key" + key + " : " + e.getMessage();
-      LOG.error(msg);
+      LOG.error("getMemcachedAsync: " + msg);
       return Deferred.fromError(new Exception(msg));
     }
   }
@@ -681,8 +744,9 @@ public class Cache {
 
   // Convert a pair of key and value in Memcached into TreeMap<Byte[], Span> (Raw data from hbase)
   // Extract array of byte into a Span ( list of RowSeq)
-  public Span deserializeToSpan(ArrayList<byte[]> results){
+  public Span deserializeToSpan(ArrayList<byte[]> results) throws Exception{
     //TODO: Optimize size of variables and speed
+//    LOG.debug("deserializeToSpan: Starting deserializeToSpan: ");
     Span span = new Span(tsdb);
     for (final byte[] result : results){
       span.addAll(bytesRangeToSpan(result, 0).getRows());

@@ -610,13 +610,13 @@ import net.opentsdb.utils.DateTime;
       return Deferred.fromError(new Exception("Tags should be defined!"));
     }
     byte[] keyBytesTemplate = new byte[metric_bytes + Const.TIMESTAMP_BYTES + tags.length];
-    LOG.debug("findCache: keyBytesTemplate: " + Arrays.toString(keyBytesTemplate));
+//    LOG.debug("findCache: keyBytesTemplate: " + Arrays.toString(keyBytesTemplate));
     // add key byte
-    LOG.debug("findCache: Add metric into template: " + Arrays.toString(metric));
+//    LOG.debug("findCache: Add metric into template: " + Arrays.toString(metric));
     System.arraycopy(metric, 0, keyBytesTemplate, 0 , metric_bytes);
-    LOG.debug("findCache: keyBytesTemplate: " + Arrays.toString(keyBytesTemplate));
+//    LOG.debug("findCache: keyBytesTemplate: " + Arrays.toString(keyBytesTemplate));
     // add tag byte
-    LOG.debug("findCache: Add tags into template: " + Arrays.toString(tags));
+//    LOG.debug("findCache: Add tags into template: " + Arrays.toString(tags));
     System.arraycopy(tags, 0, keyBytesTemplate, metric_bytes + Const.TIMESTAMP_BYTES , tags.length);
     LOG.debug("findCache: keyBytesTemplate: " + Arrays.toString(keyBytesTemplate));
     final ArrayList<byte[]> keys = tsdb.cache.processKeyCache(fragment, keyBytesTemplate, metric_bytes);
@@ -654,7 +654,7 @@ import net.opentsdb.utils.DateTime;
           if(raw_results.get(i) == null){
             throw new Exception("Get null data");
           }
-          LOG.debug("Raw of Cache: " + Arrays.toString(keys.get(i)) + " | " + raw_results.get(i).length + " bytes");
+//          LOG.debug("Raw of Cache: " + Arrays.toString(keys.get(i)) + " | " + raw_results.get(i).length + " bytes");
           // mildronize: debug
 //          printWriter.println(tsdb.cache.encodeKey(keys.get(i))+"#("+raw_results.get(i).length +")#"+ Arrays.toString(raw_results.get(i)) +"$");
         }
@@ -1184,18 +1184,18 @@ import net.opentsdb.utils.DateTime;
     public DataPoints[] call(final TreeMap<byte[], Span> spans) throws Exception {
 
       // Mildronize: Debug
-      FileWriter fileWriter = new FileWriter("/var/log/opentsdb/RowSeq." + System.currentTimeMillis());
-      PrintWriter printWriter = new PrintWriter(fileWriter);
+//      FileWriter fileWriter = new FileWriter("/var/log/opentsdb/RowSeq." + System.currentTimeMillis());
+//      PrintWriter printWriter = new PrintWriter(fileWriter);
       for (Map.Entry<byte[], Span> entry : spans.entrySet()) {
         LOG.debug("GroupByAndAggregateCB (Post-processing): Key: " + entry.getKey() + ". Value: " + entry.getValue().getRows().size() + " rows");
-        check_duplicate_row(entry.getValue().getRows());
-        for (final RowSeq rowSeq: entry.getValue().getRows()) {
-          String msg = Arrays.toString(rowSeq.getKey()) + " Value: " + Arrays.toString(rowSeq.getValues())+ " Qualifier: " + Arrays.toString(rowSeq.getQualifiers())+ " $";
-          printWriter.println(msg);
-          LOG.debug(msg);
-        }
+//        check_duplicate_row(entry.getValue().getRows());
+//        for (final RowSeq rowSeq: entry.getValue().getRows()) {
+//          String msg = Arrays.toString(rowSeq.getKey()) + " Value: " + Arrays.toString(rowSeq.getValues())+ " Qualifier: " + Arrays.toString(rowSeq.getQualifiers())+ " $";
+//          printWriter.println(msg);
+//          LOG.debug(msg);
+//        }
      }
-      printWriter.close();
+//      printWriter.close();
 
 
 //      for (final TagVFilter filter : filters) {
