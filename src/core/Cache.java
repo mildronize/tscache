@@ -318,7 +318,7 @@ public class Cache {
         LOG.debug("findStartRowSeq: the result : " + i);
         return i;
       }
-      LOG.debug("findStartRowSeq: " + baseTime + " is not in between " + startTime + " - " + (startTime + HBaseRowPeriodMs * numRangeSize) + " | RowSeq: " + rowSeqs.get(i).size() + " datapoints");
+      //LOG.debug("findStartRowSeq: " + baseTime + " is not in between " + startTime + " - " + (startTime + HBaseRowPeriodMs * numRangeSize) + " | RowSeq: " + rowSeqs.get(i).size() + " datapoints");
     }
     return -1;
   }
@@ -404,7 +404,7 @@ public class Cache {
       // First span only for defining starting fragment order
       if (spanCount == 0){
         if (rowSeqs.size() < numRangeSize){
-          LOG.debug("storeCache: rowSeqs size is too small, ignore cache");
+          LOG.info("storeCache: rowSeqs size is too small, ignore cache");
           return Deferred.fromResult(true);
         }
         start_rowSeq = findStartRowSeq(rowSeqs, startTime_fo);
@@ -446,7 +446,7 @@ public class Cache {
           throw new BadRequestException(HttpResponseStatus.BAD_REQUEST,
             "Can't serialize RowSeq into byte array: ");
         }
-        LOG.debug("storeCache: RowSeq index("+i+") : "+ item.entrySet().iterator().next().getKey());
+        //LOG.debug("storeCache: RowSeq index("+i+") : "+ item.entrySet().iterator().next().getKey());
         // send `item` to cache
         deferreds.add(setMemcached(memcachedClient, item));
         // mildronize: debug
@@ -461,7 +461,7 @@ public class Cache {
         try {
           int start_remainingRowSeq = i - numRangeSize;
           start_remainingRowSeq = start_remainingRowSeq < 0 ?0:start_remainingRowSeq;
-          LOG.debug("storeCache: rowSeqs.size():" + rowSeqs.size() + " start_remainingRowSeq: " + (start_remainingRowSeq));
+          //LOG.debug("storeCache: rowSeqs.size():" + rowSeqs.size() + " start_remainingRowSeq: " + (start_remainingRowSeq));
           restRowSeq = new ArrayList<RowSeq>(rowSeqs.subList(start_remainingRowSeq, rowSeqs.size()));
         }catch (IndexOutOfBoundsException e){
           return Deferred.fromError(e);
@@ -579,22 +579,22 @@ public class Cache {
     // debug
     long time = Bytes.getUnsignedInt(rowSeqs.get(start).getKey(), Const.SALT_WIDTH() + tsdb.metrics.width()) * 1000;
 //    LOG.debug("Storing Key: " + Arrays.toString(rowSeqs.get(start).getKey()));
-    LOG.debug("serializeRowSeq: Storing key : " + Arrays.toString(rowSeqs.get(start).getKey()) + " Timestamp: " + time + " FragmentOrder: " + startTimeToFragmentOrder(time));
+    //LOG.debug("serializeRowSeq: Storing key : " + Arrays.toString(rowSeqs.get(start).getKey()) + " Timestamp: " + time + " FragmentOrder: " + startTimeToFragmentOrder(time));
     key = encodeKey(rowSeqs.get(start).getKey());
     // Perform value
     ArrayList<byte[]> tmpValues = new ArrayList<byte[]>();
     // Add Number of Span
     int end = start + length;
     Span span_tmp = new Span(tsdb);
-    LOG.debug("serializeRowSeq: Creating a group of RowSeq ( Size: " +length + ") " );
+    //LOG.debug("serializeRowSeq: Creating a group of RowSeq ( Size: " +length + ") " );
     for(int i = start; i< end; i++) {
-      LOG.debug("serializeRowSeq: Starting RowSeq("+ i +")");
+      //LOG.debug("serializeRowSeq: Starting RowSeq("+ i +")");
       byte[] tmp = generateRowSeqBytes(rowSeqs.get(i));
       byte[] lenByte = numberToBytes(tmp.length, ROWSEQ_LENGTH_NUMBYTES);
-      LOG.debug("Out: " + Arrays.toString(lenByte) + " num: " + tmp.length);
+      //LOG.debug("Out: " + Arrays.toString(lenByte) + " num: " + tmp.length);
       tmpValues.add(lenByte);
       tmpValues.add(tmp);
-      LOG.debug("serializeRowSeq: RowSeq("+ i +")"  );
+      //LOG.debug("serializeRowSeq: RowSeq("+ i +")"  );
       // For debug
 //      span_tmp.addRowSeq(rowSeqs.get(i));
     }
