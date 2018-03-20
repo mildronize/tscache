@@ -162,6 +162,7 @@ public class Cache {
     ArrayList<CacheFragment> cacheFragments;
     // First miss
     if(lookupTable.isEmpty()) {
+      LOG.info("First Miss");
       cacheFragments = new ArrayList<CacheFragment>();
       cacheFragments.add(new CacheFragment(tsdbQuery.getStartTime(), tsdbQuery.getEndTime(), false));
     }else {
