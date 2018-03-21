@@ -23,6 +23,7 @@ import com.sun.rowset.internal.Row;
 import net.opentsdb.tree.Tree;
 import net.opentsdb.tsd.BadRequestException;
 import net.spy.memcached.MemcachedClient;
+import org.apache.commons.math3.analysis.function.Exp;
 import org.jboss.netty.handler.codec.http.HttpResponseStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -541,14 +542,37 @@ import net.opentsdb.utils.DateTime;
     final ArrayList<Deferred<byte[]>> deferreds = new ArrayList<Deferred<byte[]>>();
     final byte[] result_key;
 
+    final TsdbQuery self = this;
+    class ForwardToFindSpan{
+      public Deferred<TreeMap<byte[], Span>> run(){
+        LOG.info("findCache: forwarding action to findSpan");
+        fragment.setFailed(true);
+        TsdbQuery fragmentTsdbQuery = self.duplicate();
+        fragmentTsdbQuery.setStartTime(fragment.getStartTime());
+        fragmentTsdbQuery.setEndTime(fragment.getEndTime());
+        return fragmentTsdbQuery.findSpans();
+      }
+    }
+
     final MemcachedClient memcachedClient;
     try {
       memcachedClient = tsdb.cache.createMemcachedConnection();
     }catch(IOException e){
-      // TODO: forward action to findSpan
-      return Deferred.fromError(e);
+      LOG.warn("findCache: Can't connect to memcached server");
+      return new ForwardToFindSpan().run();
     }
-    LOG.debug("Connected to memcached server");
+
+    class ErrorCB implements Callback<Deferred<TreeMap<byte[], Span>>, Exception> {
+      public Deferred<TreeMap<byte[], Span>> call(final Exception e){
+        try{
+          memcachedClient.shutdown();
+        }catch (Exception ex){
+          LOG.warn("Can't shutdown memcache connect, ignored");
+        }
+        LOG.info("findCache.ErrorCB.call: Can't get data from Memcached");
+        return new ForwardToFindSpan().run();
+      }
+    }
 
     // get metrics
     final short metric_width = tsdb.metrics.width();
@@ -560,15 +584,12 @@ import net.opentsdb.utils.DateTime;
       metric = UniqueId.stringToUid(metric_uid);
     }
 
-
     // convert tags to array of bytes
-
-    final short name_width = tsdb.tag_names.width();
-    final short value_width = tsdb.tag_values.width();
-    final short tag_bytes = (short) (name_width + value_width);
+//    final short name_width = tsdb.tag_names.width();
+//    final short value_width = tsdb.tag_values.width();
+//    final short tag_bytes = (short) (name_width + value_width);
     final short metric_bytes = (short) (Const.SALT_WIDTH()
                                           + tsdb.metrics.width());
-
     // get name of
     ArrayList<byte[]> tagUids = new ArrayList<byte[]>();
     // get tags
@@ -592,22 +613,25 @@ import net.opentsdb.utils.DateTime;
           byte[] key_tmp = filter.getTagkBytes();
           List<byte[]> tagVUids = filter.getTagVUids();
           if(tagVUids.size() != 1){
-            // TODO: forward action to findSpan
-            return Deferred.fromError(new Exception("Cache support only one tag k and tag v"));
+            String msg = "findCache: Cache support only one tag k and tag v";
+            LOG.warn(msg);
+            return new ForwardToFindSpan().run();
           }
           tagUids.add(key_tmp);
           tagUids.add(tagVUids.get(0));
         }
       }
     } else {
-      // TODO: forward action to findSpan
-      return Deferred.fromError(new Exception("Tags error or no filter literal_or"));
+      String msg = "findCache: Tags error or no filter `literal_or`";
+      LOG.warn(msg);
+      return new ForwardToFindSpan().run();
     }
     // TODO: Test this function
     byte[] tags = tsdb.cache.arrayListToBytes(tagUids);
     if(tags.length == 0){
-      // TODO: forward action to findSpan
-      return Deferred.fromError(new Exception("Tags should be defined!"));
+      String msg = "findCache: Tags should be defined!";
+      LOG.warn(msg);
+      return new ForwardToFindSpan().run();
     }
     byte[] keyBytesTemplate = new byte[metric_bytes + Const.TIMESTAMP_BYTES + tags.length];
 //    LOG.debug("findCache: keyBytesTemplate: " + Arrays.toString(keyBytesTemplate));
@@ -623,17 +647,14 @@ import net.opentsdb.utils.DateTime;
     // Select first key of span as a key of the result
     if(keys.size() == 0){
       // TODO: forward action to findSpan
-      throw new BadRequestException(HttpResponseStatus.BAD_REQUEST,
-        "Can't build key of cache");
+      String msg = "findCache: Can't build key of cache: Cache.processKeyCache return empty lists of key";
+      LOG.warn(msg);
+      return new ForwardToFindSpan().run();
     }
     result_key = keys.get(0);
 
-    try {
-      for (final byte[] key : keys) {
-        deferreds.add(tsdb.cache.getMemcachedAsync(memcachedClient, tsdb.cache.encodeKey(key)));
-      }
-    } catch (Exception e){
-      return Deferred.fromError(new Exception("Can't encode key"));
+    for (final byte[] key : keys) {
+      deferreds.add(tsdb.cache.getMemcachedAsync(memcachedClient, tsdb.cache.encodeKey(key)));
     }
 
     class GroupFinished implements Callback<TreeMap<byte[], Span>, ArrayList<byte[]>> {
@@ -644,16 +665,14 @@ import net.opentsdb.utils.DateTime;
         final TreeMap<byte[], Span> result_spans = // The key is a row key from HBase.
           new TreeMap<byte[], Span>(new SpanCmp(
             (short)(Const.SALT_WIDTH() + metric_width)));
-        LOG.debug("findCache.GroupFinisih.call:: Span size (num of rowSeq): " + raw_results.size());
+        LOG.debug("findCache.GroupFinisih.call: Span size (num of rowSeq): " + raw_results.size());
         // mildronize: debug
 //        final FileWriter fileWriter;
 //        final PrintWriter printWriter;
 //        fileWriter = new FileWriter("/var/log/opentsdb/get." + System.currentTimeMillis());
 //        printWriter = new PrintWriter(fileWriter);
         for(int i = 0; i < raw_results.size(); i++){
-          if(raw_results.get(i) == null){
-            throw new Exception("Get null data");
-          }
+          if(raw_results.get(i) == null) throw new Exception("Get null data");
 //          LOG.debug("Raw of Cache: " + Arrays.toString(keys.get(i)) + " | " + raw_results.get(i).length + " bytes");
           // mildronize: debug
 //          printWriter.println(tsdb.cache.encodeKey(keys.get(i))+"#("+raw_results.get(i).length +")#"+ Arrays.toString(raw_results.get(i)) +"$");
@@ -666,20 +685,7 @@ import net.opentsdb.utils.DateTime;
 
     }
 
-    final TsdbQuery self = this;
 
-    class ErrorCB implements Callback<Deferred<TreeMap<byte[], Span>>, Exception> {
-      public Deferred<TreeMap<byte[], Span>> call(final Exception e) throws Exception {
-        memcachedClient.shutdown();
-        fragment.setFailed(true);
-        // forward action to findSpan
-        LOG.info("findCache.ErrorCB.call: Can't get data from Memcached, forward action to findSpan!");
-        TsdbQuery fragmentTsdbQuery = self.duplicate();
-        fragmentTsdbQuery.setStartTime(fragment.getStartTime());
-        fragmentTsdbQuery.setEndTime(fragment.getEndTime());
-        return fragmentTsdbQuery.findSpans();
-      }
-    }
 
     return Deferred.groupInOrder(deferreds)
       .addCallback(new GroupFinished())
@@ -689,24 +695,22 @@ import net.opentsdb.utils.DateTime;
   private Deferred<TreeMap<byte[], Span>> buildFragmentAsync(final ArrayList<CacheFragment> cacheFragments){
     final ArrayList<Deferred<TreeMap<byte[], Span>>> deferreds = new ArrayList<Deferred<TreeMap<byte[], Span>>>();
 
-    for (final CacheFragment cacheFragment: cacheFragments){
+    for (int i=0; i<cacheFragments.size() ;i++){
 
-      if (cacheFragment.isInCache()) {  // true in cache
-        deferreds.add(findCache(cacheFragment));
-//        TsdbQuery fragmentTsdbQuery = this.duplicate();
-//        fragmentTsdbQuery.setStartTime(cacheFragment.getStartTime());
-//        fragmentTsdbQuery.setEndTime(cacheFragment.getEndTime());
-//        deferreds.add(fragmentTsdbQuery.findSpans());
+      if (cacheFragments.get(i).isInCache()) {  // true in cache
+        LOG.info("buildFragmentAsync: Starting findCache for CacheFragment(" + i + ") -> " + cacheFragments.get(i));
+        deferreds.add(findCache(cacheFragments.get(i)));
       }else{
         TsdbQuery fragmentTsdbQuery = this.duplicate();
-        fragmentTsdbQuery.setStartTime(cacheFragment.getStartTime());
-        fragmentTsdbQuery.setEndTime(cacheFragment.getEndTime());
+        fragmentTsdbQuery.setStartTime(cacheFragments.get(i).getStartTime());
+        fragmentTsdbQuery.setEndTime(cacheFragments.get(i).getEndTime());
+        LOG.info("buildFragmentAsync: Starting findSpans for CacheFragment(" + i + ") -> " + cacheFragments.get(i));
         deferreds.add(fragmentTsdbQuery.findSpans());
       }
     }
     class MergeFragmentsCB implements Callback<TreeMap<byte[], Span>, ArrayList<TreeMap<byte[], Span>>> {
       @Override
-      public TreeMap<byte[], Span> call(final ArrayList<TreeMap<byte[], Span>> spans) {
+      public TreeMap<byte[], Span> call(final ArrayList<TreeMap<byte[], Span>> spans) throws Exception{
         // merge each TreeMap together
         final short metric_width = tsdb.metrics.width();
         final TreeMap<byte[], Span> result_spans = // The key is a row key from HBase.
@@ -714,13 +718,19 @@ import net.opentsdb.utils.DateTime;
             (short)(Const.SALT_WIDTH() + metric_width)));
 
         LOG.debug("buildFragmentAsync.MergeFragmentsCB.call: Merge raw data -> GroupFinished: Span size: " + spans.size());
+        // Remove span if it's null
+        Iterator<TreeMap<byte[], Span>> spansIterator = spans.iterator();
+        while (spansIterator.hasNext()) {
+          if (spansIterator.next() == null )
+            spansIterator.remove();
+        }
         if(spans.size() <= 0)
           return result_spans;
         byte[] result_key = spans.get(0).entrySet().iterator().next().getKey();
         Span result_span = new Span(tsdb);
         Set<RowSeq> rowSeqs_result =  new LinkedHashSet<RowSeq>();
         for(final TreeMap<byte[], Span> span : spans) {
-
+          if (span == null) continue;
           for (Map.Entry<byte[], Span> element : span.entrySet())
             LOG.debug("buildFragmentAsync.MergeFragmentsCB.call: Fragment (Span) : " + element.getKey() + "["+ Arrays.toString(element.getKey()) + "]| Value: " + element.getValue().getRows().size() + " rows") ;
 
@@ -747,22 +757,26 @@ import net.opentsdb.utils.DateTime;
 
     class StoreCachedCB implements Callback<ArrayList<TreeMap<byte[], Span>>, ArrayList<TreeMap<byte[], Span>>> {
       @Override
-      public ArrayList<TreeMap<byte[], Span>> call(final ArrayList<TreeMap<byte[], Span>> spans) {
+      public ArrayList<TreeMap<byte[], Span>> call(final ArrayList<TreeMap<byte[], Span>> spans) throws Exception {
 
         final ArrayList<Deferred<Boolean>> deferreds = new ArrayList<Deferred<Boolean>>();
 
         for (int i = 0; i < spans.size(); i++) {
           if (!cacheFragments.get(i).isInCache() || cacheFragments.get(i).isFailed()) {  // true in cache
-            // store in memcached
-            LOG.debug("buildFragmentAsync.StoreCB.call: starting store cache fragment");
-            deferreds.add(tsdb.cache.storeCache(cacheFragments.get(i), spans.get(i)));
+            // store in memcache
+            LOG.info("buildFragmentAsync: Starting store CacheFragment(" + i + ") -> " + cacheFragments.get(i));
+            try {
+              deferreds.add(tsdb.cache.storeCache(cacheFragments.get(i), spans.get(i)));
+            }catch (Exception e){
+              LOG.warn("buildFragmentAsync.StoreCB.call: "+ e.getMessage());
+            }
           }
         }
 
         try {
           Deferred.groupInOrder(deferreds).join();
         } catch (Exception e) {
-          LOG.warn("buildFragmentAsync.StoreCB.call: Can't store cached fragment, ignore storing to cache");
+          LOG.warn("buildFragmentAsync.StoreCB.call: Exception");
         }
         // and by pass the result to next callback
         return spans;

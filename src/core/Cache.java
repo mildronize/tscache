@@ -11,16 +11,15 @@ import org.jboss.netty.handler.codec.http.HttpResponseStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.FileWriter;
 import java.io.IOException;
-import java.io.PrintWriter;
-import java.lang.reflect.Array;
 import java.net.InetSocketAddress;
 import java.nio.BufferOverflowException;
 import java.nio.BufferUnderflowException;
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Cache module
@@ -62,7 +61,7 @@ public class Cache {
   private final String memcachedHost = "memcached";
   private final int memcachedPort = 11211;
   private final int memcachedExpiredTime = 0;
-  private final int memcachedVerifyingTime = 1;
+  private final int memcachedTimeOut = 60;
 
   public Cache(TSDB tsdb) {
     LOG.info("Create Cache object");
@@ -84,6 +83,7 @@ public class Cache {
 
   public void dropCaches(){
     lookupTable = new CacheLookupTable();
+    // TODO: Clear cache in memcache
 //    final MemcachedClient memcachedClient;
 //    try {
 //      memcachedClient = createMemcachedConnection();
@@ -223,10 +223,9 @@ public class Cache {
     }
 
     LOG.info("buildCacheFragments: List of CacheFragment:");
-    for(final CacheFragment cf: cacheFragments){
-      LOG.info("buildCacheFragments: " + cf.toString());
+    for(int i = 0; i < cacheFragments.size(); i++){
+      LOG.info("buildCacheFragments: CacheFragment(" +cacheFragments.get(i)+ ")" + cacheFragments.get(i).toString());
     }
-
     return cacheFragments;
   }
 
@@ -234,11 +233,11 @@ public class Cache {
   // findCache helper functions //
   // -------------------------- //
 
-  public String encodeKey(byte[] key) throws Exception{
+  public String encodeKey(byte[] key){
     return Base64.getEncoder().encodeToString(key);
   }
 
-  public byte[] decodeKey(String key) throws Exception{
+  public byte[] decodeKey(String key){
     return Base64.getDecoder().decode(key);
   }
 
@@ -276,7 +275,7 @@ public class Cache {
       System.arraycopy(keyBytesTemplate, 0, key, 0 , keyBytesTemplate.length);
       Bytes.setInt(key, (int) base_time, metric_bytes);
 //      LOG.debug("Getting Key: " + Arrays.toString(key));
-      long time = Bytes.getUnsignedInt(key, Const.SALT_WIDTH() + tsdb.metrics.width()) * 1000;
+//      long time = Bytes.getUnsignedInt(key, Const.SALT_WIDTH() + tsdb.metrics.width()) * 1000;
       //LOG.debug("Getting key (FO): " +Arrays.toString(key)+  " - " + time + "  " + timeToFragmentOrder(time));
       result.add(key);
     }
@@ -329,7 +328,7 @@ public class Cache {
     if (client == null) {
       String msg = "MemcachedClient object is null";
       LOG.error("setMemcached: " + msg);
-      return Deferred.fromError(new Exception(msg));
+      return Deferred.fromResult(false);
     }
 //    LOG.debug("setMemcachedAsync client ready ");
     String key = item.entrySet().iterator().next().getKey();
@@ -342,19 +341,29 @@ public class Cache {
     try {
 //      byte[] result = getMemcachedAsync(client, key).joinUninterruptibly();
 //      LOG.debug("Get result " + key + ": " + Arrays.toString(result));
-      return Deferred.fromResult(future.get(memcachedVerifyingTime, TimeUnit.SECONDS));
-    }catch (Exception e){
-        String msg = "Failed to store value for key" + key + " : " + e.getMessage();
-        LOG.error("setMemcached: " + msg);
-        return Deferred.fromError(new Exception(msg));
+      return Deferred.fromResult(future.get(memcachedTimeOut, TimeUnit.SECONDS));
+    }catch (TimeoutException e){
+      LOG.error("setMemcached: " + Arrays.toString(e.getStackTrace()));
+    }catch (ExecutionException e){
+      String msg = "Failed to store value for key" + key + " : " + e.getMessage();
+      LOG.error("setMemcached: " + msg);
+      LOG.error("setMemcached: " + Arrays.toString(e.getStackTrace()));
+    }catch (InterruptedException e){
+      LOG.error("setMemcached: " + Arrays.toString(e.getStackTrace()));
     }
+    LOG.error("setMemcached: Can't set value ( status: " + future.getStatus() + " )");
+    return Deferred.fromResult(false);
   }
 
   public MemcachedClient createMemcachedConnection() throws IOException{
     return new MemcachedClient(new InetSocketAddress(memcachedHost, memcachedPort));
   }
 
-  public Deferred<Boolean> storeCache(CacheFragment fragment, TreeMap<byte[], Span> spans){
+  public Deferred<Boolean> storeCache(CacheFragment fragment, TreeMap<byte[], Span> spans) throws Exception{
+    if (spans == null){
+      String msg = "storeCache: Data to be stored is null";
+      throw new Exception(msg);
+    }
     // mildronize: debug
 //    final FileWriter fileWriter;
 //    final PrintWriter printWriter;
@@ -375,7 +384,7 @@ public class Cache {
     }catch(IOException e){
       return Deferred.fromError(e);
     }
-    LOG.debug("storeCache: Connected to memcached server");
+//    LOG.debug("storeCache: Connected to memcached server");
 
     long startTime = fragment.getStartTime();
     long endTime = fragment.getEndTime();
@@ -474,6 +483,7 @@ public class Cache {
 
     }
 
+    LOG.debug("storeCache: Deferred size: "+ deferreds.size());
 
     class UpdateCacheCB implements Callback<Boolean, ArrayList<Boolean>> {
       @Override
@@ -481,6 +491,7 @@ public class Cache {
         memcachedClient.shutdown();
         //printWriter.close();
         LOG.debug("storeCache.UpdateCacheCB.call: memcachedClient.shutdown");
+        LOG.debug("storeCache: result size: "+ result.size());
         lookupTable.mark(start_fo, result.size());
         return true;
       }
@@ -734,7 +745,7 @@ public class Cache {
     GetFuture<Object> future = client.asyncGet(key);
 //    LOG.debug("getMemcacheAsync get!");
     try {
-      return Deferred.fromResult((byte[])future.get(memcachedVerifyingTime, TimeUnit.SECONDS));
+      return Deferred.fromResult((byte[])future.get(memcachedTimeOut, TimeUnit.SECONDS));
     }catch (Exception e){
       String msg = "Failed to get value for key" + key + " : " + e.getMessage();
       LOG.error("getMemcachedAsync: " + msg);
