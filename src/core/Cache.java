@@ -2,7 +2,9 @@ package net.opentsdb.core;
 
 import com.stumbleupon.async.Callback;
 import com.stumbleupon.async.Deferred;
+import net.opentsdb.stats.QueryStats;
 import net.opentsdb.tsd.BadRequestException;
+import net.opentsdb.utils.DateTime;
 import net.spy.memcached.MemcachedClient;
 import net.spy.memcached.internal.GetFuture;
 import net.spy.memcached.internal.OperationFuture;
@@ -48,15 +50,12 @@ public class Cache {
   private String charset = "ASCII";
 
   // Metadata size in byte
-  public static final short spanCount_numBytes = 2; // numBytes of number of Span
-  public static final short spanLength_numBytes = 4; // numBytes of Span
-  public static final short rowSeqCount_numBytes = 2;
   public static final short ROWSEQ_LENGTH_NUMBYTES = 4;  // int
   public static final short ROWSEQ_KEY_NUMBYTES = 1; // byte
   public static final short ROWSEQ_QUALIFIER_NUMBYTES = 2; //short
   public static final short ROWSEQ_VALUE_NUMBYTES = 2; //short
 
-  private static final short NUM_RANGE_SIZE = 16;
+  private static final short NUM_RANGE_SIZE = 64;
 
   private final String memcachedHost = "memcached";
   private final int memcachedPort = 11211;
@@ -159,13 +158,18 @@ public class Cache {
 
   public ArrayList<CacheFragment> buildCacheFragments(TsdbQuery tsdbQuery){
     // Decision
+    int statIsFirstMiss;
+    // Stat in nanoseconds
+    final long buildCacheFragmentsStart = DateTime.nanoTime();
     ArrayList<CacheFragment> cacheFragments;
     // First miss
     if(lookupTable.isEmpty()) {
       LOG.info("First Miss");
+      statIsFirstMiss = 1;
       cacheFragments = new ArrayList<CacheFragment>();
       cacheFragments.add(new CacheFragment(tsdbQuery.getStartTime(), tsdbQuery.getEndTime(), false));
     }else {
+      statIsFirstMiss = 0;
       // XOR operation for finding which part in cache or not?
       int start_fo = startTimeToFragmentOrder(tsdbQuery.getStartTime());
       // Including the end of fragment order
@@ -177,7 +181,8 @@ public class Cache {
       // Build body
       ArrayList<Long> results = lookupTable.buildFragmentBits(start_fo, end_fo);
       try {
-        cacheFragments = buildCacheFragmentsFromBits(results, start_fo, end_fo, lookupTable.getIndexSize());
+        cacheFragments = buildCacheFragmentsFromBits(results, start_fo, end_fo, lookupTable
+          .getIndexSize());
       }catch(Exception e){
         LOG.error("buildCacheFragments: " + e.getMessage());
         return null;
@@ -226,6 +231,19 @@ public class Cache {
     for(int i = 0; i < cacheFragments.size(); i++){
       LOG.info("buildCacheFragments: CacheFragment(" +cacheFragments.get(i)+ ")" + cacheFragments.get(i).toString());
     }
+
+    if (tsdbQuery.getQueryStats() != null) {
+//      tsdbQuery.getQueryStats().addScannerStat(tsdbQuery.getQueryIndex(), 0,
+//        QueryStats.QueryStat.IS_FIRST_MISS, statIsFirstMiss);
+//      tsdbQuery.getQueryStats().addScannerStat(tsdbQuery.getQueryIndex(), 0,
+//        QueryStats.QueryStat.NUMBER_CACHE_FRAGMENTS, cacheFragments.size());
+      tsdbQuery.getQueryStats().addStat( tsdbQuery.getQueryIndex(),
+        QueryStats.QueryStat.IS_FIRST_MISS, statIsFirstMiss);
+      tsdbQuery.getQueryStats().addStat( tsdbQuery.getQueryIndex(),
+        QueryStats.QueryStat.NUMBER_CACHE_FRAGMENTS, cacheFragments.size());
+      tsdbQuery.getQueryStats().addStat( tsdbQuery.getQueryIndex(),
+        QueryStats.QueryStat.BUILD_CACHE_FRAGMENTS_TIME, DateTime.nanoTime() - buildCacheFragmentsStart);
+    }
     return cacheFragments;
   }
 
@@ -244,14 +262,14 @@ public class Cache {
   public ArrayList<byte[]> processKeyCache(CacheFragment fragment, byte[] keyBytesTemplate, short metric_bytes){
     // Generate a list of keys what to get from Memcached
     ArrayList<byte[]> result = new ArrayList<byte[]>();
-    LOG.debug("Key Template: " + Arrays.toString(keyBytesTemplate));
+    if(LOG.isDebugEnabled())LOG.debug("Key Template: " + Arrays.toString(keyBytesTemplate));
     // get a list of Fragment order that to get
     // 1 fo = 1 key
 
     // Retrieve from cache range
     int start_fragmentOrder = timeToFragmentOrder(fragment.getStartTime()); // use fragment order instead of start_fo
     int end_fragmentOrder = endTimeToFragmentOrder(fragment.getEndTime());
-    LOG.debug("process key for getting cache: " +start_fragmentOrder+ " , " + end_fragmentOrder);
+    if(LOG.isDebugEnabled())LOG.debug("process key for getting cache: " +start_fragmentOrder+ " , " + end_fragmentOrder);
     for (int fo = start_fragmentOrder; fo <= end_fragmentOrder; fo ++){
       long timestamp = fragmentOrderToStartTime(fo);
       // we only accept positive unix epoch timestamps in seconds or milliseconds
@@ -309,13 +327,13 @@ public class Cache {
   }
 
   public int findStartRowSeq(ArrayList<RowSeq> rowSeqs, long startTime){
-    LOG.debug("findStartRowSeq: Finding (" + startTime+") in rowSeqs, for finding start point of the fragment(group of rowSeq)");
+    if(LOG.isDebugEnabled())LOG.debug("findStartRowSeq: Finding (" + startTime+") in rowSeqs, for finding start point of the fragment(group of rowSeq)");
     int i;
     for ( i = 0; i < rowSeqs.size(); i++) {
       long baseTime = rowSeqs.get(i).baseTime() * 1000; // convert to milliseconds
 //      LOG.debug(baseTime + " >= " + startTime_fo + " AND " + baseTime + " < " + (startTime_fo + HBaseRowPeriod*numRangeSize));
       if (baseTime >= startTime && baseTime < ( startTime + HBaseRowPeriodMs * numRangeSize ) ){
-        LOG.debug("findStartRowSeq: the result : " + i);
+        if(LOG.isDebugEnabled())LOG.debug("findStartRowSeq: the result : " + i);
         return i;
       }
       //LOG.debug("findStartRowSeq: " + baseTime + " is not in between " + startTime + " - " + (startTime + HBaseRowPeriodMs * numRangeSize) + " | RowSeq: " + rowSeqs.get(i).size() + " datapoints");
@@ -359,11 +377,15 @@ public class Cache {
     return new MemcachedClient(new InetSocketAddress(memcachedHost, memcachedPort));
   }
 
-  public Deferred<Boolean> storeCache(CacheFragment fragment, TreeMap<byte[], Span> spans) throws Exception{
+  public Deferred<Boolean> storeCache(ArrayList<CacheFragment> fragments, ArrayList<TreeMap<byte[], Span>> spans_list, final QueryStats query_stats, final int cacheFragmentId) throws Exception{
+    CacheFragment fragment = fragments.get(cacheFragmentId);
+    TreeMap<byte[], Span> spans = spans_list.get(cacheFragmentId);
     if (spans == null){
       String msg = "storeCache: Data to be stored is null";
       throw new Exception(msg);
     }
+    final long storeCacheStart = DateTime.nanoTime();
+    long serializeTime = 0;
     // mildronize: debug
 //    final FileWriter fileWriter;
 //    final PrintWriter printWriter;
@@ -396,7 +418,7 @@ public class Cache {
 //    long endTime_fo = fragmentOrderToEndTime(end_fo);
     // a result (TreeMap<byte[], Span>) can be more than one
 
-    LOG.debug("storeCache: start_fo:" +start_fo + " end_fo: " + end_fo + " startTime: " + startTime_fo);
+    if(LOG.isDebugEnabled())LOG.debug("storeCache: start_fo:" +start_fo + " end_fo: " + end_fo + " startTime: " + startTime_fo);
     // The number of rest of RowSeq in previous Span
     int remainingRowSeq = 0;
 
@@ -404,11 +426,11 @@ public class Cache {
     ArrayList<RowSeq> restRowSeq = null;
     int spanCount = 0;
     for(Map.Entry<byte[], Span> entry : spans.entrySet()) {
-      LOG.debug("storeCache: Span " + (spanCount + 1));
+      if(LOG.isDebugEnabled())LOG.debug("storeCache: Span " + (spanCount + 1));
       // Group row key
       Span span = entry.getValue();  // ignore the key
       ArrayList<RowSeq> rowSeqs = span.getRows();
-      LOG.debug("storeCache: get rowSeqs size: " + rowSeqs.size());
+      if(LOG.isDebugEnabled())LOG.debug("storeCache: get rowSeqs size: " + rowSeqs.size());
       int i;
       int start_rowSeq = 0;
       // First span only for defining starting fragment order
@@ -432,7 +454,9 @@ public class Cache {
         tmp.addAll(new ArrayList<RowSeq>(rowSeqs.subList( 0 , numRangeSize - remainingRowSeq)));
         start_rowSeq = numRangeSize - remainingRowSeq;
         try {
+          long serializeStartTime = DateTime.nanoTime();
           item = serializeRowSeq(tmp);
+          serializeTime += DateTime.nanoTime() - serializeStartTime;
         }catch (Exception e){
           LOG.error("storeCache: " + e.getMessage());
           return Deferred.fromError(e);
@@ -450,7 +474,9 @@ public class Cache {
         if (i + numRangeSize > rowSeqs.size())
           break;
         try {
+          long serializeStartTime = DateTime.nanoTime();
           item = serializeRowSeq(rowSeqs, i, numRangeSize);
+          serializeTime += DateTime.nanoTime() - serializeStartTime;
         }catch (Exception e){
           LOG.error("storeCache: " + e.getMessage());
           throw new BadRequestException(HttpResponseStatus.BAD_REQUEST,
@@ -465,7 +491,7 @@ public class Cache {
         //printWriter.println(key+"#("+value.length +")#"+ Arrays.toString(value) +"$");
       }
       remainingRowSeq = rowSeqs.size() - i;
-      LOG.debug("storeCache: remainingRowSeq = "+remainingRowSeq);
+      if(LOG.isDebugEnabled())LOG.debug("storeCache: remainingRowSeq = "+remainingRowSeq);
       if (remainingRowSeq > 0 ){
         // copy the rest of this rowseq into `restRowSeq`
         try {
@@ -483,16 +509,21 @@ public class Cache {
 
     }
 
-    LOG.debug("storeCache: Deferred size: "+ deferreds.size());
+    final long FinalSerializeTime = serializeTime;
+    if(LOG.isDebugEnabled())LOG.debug("storeCache: Deferred size: "+ deferreds.size());
 
     class UpdateCacheCB implements Callback<Boolean, ArrayList<Boolean>> {
       @Override
       public Boolean call(final ArrayList<Boolean> result) {
         memcachedClient.shutdown();
         //printWriter.close();
-        LOG.debug("storeCache.UpdateCacheCB.call: memcachedClient.shutdown");
-        LOG.debug("storeCache: result size: "+ result.size());
+        if(LOG.isDebugEnabled())LOG.debug("storeCache.UpdateCacheCB.call: memcachedClient.shutdown");
+        if(LOG.isDebugEnabled())LOG.debug("storeCache: result size: "+ result.size());
         lookupTable.mark(start_fo, result.size());
+        if (query_stats!= null){
+          query_stats.addCacheStat(cacheFragmentId, QueryStats.QueryStat.STORE_CACHE_TIME, DateTime.nanoTime() - storeCacheStart);
+          query_stats.addCacheStat(cacheFragmentId, QueryStats.QueryStat.CACHE_SERIALIZATION_TIME, FinalSerializeTime);
+        }
         return true;
       }
     }

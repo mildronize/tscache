@@ -78,7 +78,7 @@ public class CacheLookupTable {
 
   /* Mark bit 1 from start FO until numFragment */
   public void mark(int start_fragmentOrder, int numFragment) throws IndexOutOfBoundsException {
-    LOG.debug("CacheLookupTable.mark:  Mark bit 1 from start_fragmentOrder("+start_fragmentOrder+") until numFragment("+numFragment+") ");
+    if(LOG.isDebugEnabled())LOG.debug("CacheLookupTable.mark:  Mark bit 1 from start_fragmentOrder("+start_fragmentOrder+") until numFragment("+numFragment+") ");
     int end_fragmentOrder = start_fragmentOrder + numFragment - 1;
     int incomingEndBlockOrder = calcBlockOrder(end_fragmentOrder);
     int incomingBlockOrder = calcBlockOrder(start_fragmentOrder);
@@ -208,10 +208,11 @@ public class CacheLookupTable {
     ArrayList<Long> queryIndexes = convertToQueryIndexes(startFragmentOrder, endFragmentOrder);
     int startQueryBlockOrder = calcBlockOrder(startFragmentOrder);
     int endQueryBlockOrder = calcBlockOrder(endFragmentOrder);
-    LOG.debug("buildFragmentBits: QueryIndexes: " + printIndexes(queryIndexes, startQueryBlockOrder, endQueryBlockOrder));
-    LOG.debug("buildFragmentBits: CacheIndexes: " + printIndexes(cacheIndexes, 0, cacheIndexes.size()-1));
+    if(LOG.isDebugEnabled())LOG.debug("buildFragmentBits: startQueryBlockOrder = " + startQueryBlockOrder + " cacheIndexes.size():" +cacheIndexes.size() + " queryIndexes.size():" +queryIndexes.size());
+    if(LOG.isDebugEnabled())LOG.debug("buildFragmentBits: QueryIndexes: " + printIndexes(queryIndexes, startQueryBlockOrder, endQueryBlockOrder));
+    if(LOG.isDebugEnabled())LOG.debug("buildFragmentBits: CacheIndexes: " + printIndexes(cacheIndexes, 0, cacheIndexes.size()-1));
     ArrayList<Long> result;
-    LOG.debug("buildFragmentBits: startQueryBlockOrder = " + startQueryBlockOrder + " cacheIndexes.size():" +cacheIndexes.size() + " queryIndexes.size():" +queryIndexes.size());
+
     if(startQueryBlockOrder > cacheIndexes.size() -  1){
       // If query and cache isn't overlapping
       LOG.info("buildFragmentBits: query and cache isn't overlapping");
@@ -223,7 +224,7 @@ public class CacheLookupTable {
       LOG.info("buildFragmentBits: query and cache is overlapping");
       // If length of queryIndexes > length of cacheIndexes; XOR until the end of cacheIndexes, after that fill all 1 bits;
       int numNotInCacheBlock = queryIndexes.size() - cacheIndexes.size();
-      LOG.debug("buildFragmentBit: numNotInCacheBlock:       " + numNotInCacheBlock + " " +queryIndexes.size() + " " + cacheIndexes.size());
+      if(LOG.isDebugEnabled())LOG.debug("buildFragmentBit: numNotInCacheBlock:       " + numNotInCacheBlock + " " +queryIndexes.size() + " " + cacheIndexes.size());
       if (numNotInCacheBlock > 0)
         result = findCachedBits(queryIndexes, startQueryBlockOrder, cacheIndexes.size() - 1);
       else
@@ -237,7 +238,7 @@ public class CacheLookupTable {
     }
 
     //    Note: No head adding
-    LOG.debug("buildFragmentBit: Result:     " + printIndexes(result));
+//    LOG.debug("buildFragmentBit: Result:     " + printIndexes(result));
     return result;
 
   }

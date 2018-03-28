@@ -110,6 +110,9 @@ public class QueryStats {
   
   /** Hold a list of stats for the sub queries */
   private final Map<Integer, Map<QueryStat, Long>> query_stats;
+
+  /** Hold a list of stats for the cache fragments */
+  private final Map<Integer, Map<QueryStat, Long>> cache_stats;
   
   /** Holds a list of stats for each scanner */
   private final Map<Integer, Map<Integer, Map<QueryStat, Long>>> scanner_stats;
@@ -149,7 +152,20 @@ public class QueryStats {
     HBASE_TIME ("hbaseTime", true),
     UID_PAIRS_RESOLVED ("uidPairsResolved", false),
     SCANNER_TIME ("scannerTime", true),
-    
+
+    // Cache stats
+    IS_FIRST_MISS ("isFirstMiss", false),
+    NUMBER_CACHE_FRAGMENTS ("numberCacheFragments", false),
+    CACHE_FRAGMENTS_TYPE ("cacheFragmentsType", false),
+    CACHE_SERIALIZATION_TIME ("cacheSerializationTime", true),
+    CACHE_UNSERIALIZATION_TIME ("cacheUnserializationTime", true),
+    CACHE_MERGE_TIME ("cacheMergeTime", true),
+    BUILD_CACHE_FRAGMENTS_TIME ("buildCacheFragmentsTime", true),
+    STORE_CACHE_TIME ("storeCacheTime", true),
+    FIND_CACHE_TIME ("findCacheTime", true),
+    // SCANNER_TIME == FIND_SPAN_TIME
+    FIND_SPAN_TIME ("findSpanTime", true),
+
     // Overall Salt Scanner stats
     SCANNER_MERGE_TIME ("saltScannerMergeTime", true),
     
@@ -251,6 +267,7 @@ public class QueryStats {
     query_start_ms = DateTime.currentTimeMillis();
     overall_stats = new HashMap<QueryStat, Long>();
     query_stats = new ConcurrentHashMap<Integer, Map<QueryStat, Long>>(1);
+    cache_stats = new ConcurrentHashMap<Integer, Map<QueryStat, Long>>(1);
     scanner_stats = new ConcurrentHashMap<Integer, 
         Map<Integer, Map<QueryStat, Long>>>(1);
     scanner_servers = new ConcurrentHashMap<Integer, Map<Integer, Set<String>>>(1);
@@ -459,6 +476,23 @@ public class QueryStats {
     if (qs == null) {
       qs = new HashMap<QueryStat, Long>();
       query_stats.put(query_index, qs);
+    }
+    qs.put(name, value);
+  }
+
+  /**
+   * Adds a stat for a cache fragments, replacing it if it exists. Times must be
+   * in nanoseconds.
+   * @param query_index The index of the sub query to update
+   * @param name The name of the stat to update
+   * @param value The value to set
+   */
+  public void addCacheStat(final int cache_index, final QueryStat name,
+                      final long value) {
+    Map<QueryStat, Long> qs = cache_stats.get(cache_index);
+    if (qs == null) {
+      qs = new HashMap<QueryStat, Long>();
+      cache_stats.put(cache_index, qs);
     }
     qs.put(name, value);
   }
@@ -789,6 +823,7 @@ public class QueryStats {
         map.putAll(qs);
       }
     }
+
     return map;
   }
 
@@ -868,7 +903,50 @@ public class QueryStats {
         }
       }
     }
+
+    // get Cache stat
+    final Iterator<Entry<Integer, Map<QueryStat, Long>>> it =
+      cache_stats.entrySet().iterator();
+    while (it.hasNext()) {
+      final Entry<Integer, Map<QueryStat, Long>> entry = it.next();
+      final Map<String, Object> qs1 = new HashMap<String, Object>(1);
+      qs1.put(String.format("CacheFragmentIdx_%02d", entry.getKey()),
+        getCacheStats(entry.getKey()));
+      query_map.putAll(qs1);
+    }
+
     return query_map;
+  }
+
+  /**
+   * Returns a map of stats for a single sub query
+   * @param index The sub query to fetch
+   * @return A map with stats to print or null if the sub query didn't have any
+   * data.
+   */
+  public Map<String, Object> getCacheStats(final int index) {
+
+    final Map<QueryStat, Long> qs = cache_stats.get(index);
+    if (qs == null) {
+      return null;
+    }
+
+    final Map<String, Object> cache_map = new TreeMap<String, Object>();
+    cache_map.put("CacheFragmentIndex", index);
+
+    final Iterator<Entry<QueryStat, Long>> stats_it =
+      qs.entrySet().iterator();
+    while (stats_it.hasNext()) {
+      final Entry<QueryStat, Long> stat = stats_it.next();
+      if (stat.getKey().is_time) {
+        cache_map.put(stat.getKey().toString(),
+          DateTime.msFromNano(stat.getValue()));
+      } else {
+        cache_map.put(stat.getKey().toString(), stat.getValue());
+      }
+    }
+
+    return cache_map;
   }
   
   /** @return A stat for the overall query or -1 if the stat didn't exist. */

@@ -19,7 +19,6 @@ import java.net.InetSocketAddress;
 import java.nio.charset.Charset;
 import java.util.*;
 
-import com.sun.rowset.internal.Row;
 import net.opentsdb.tree.Tree;
 import net.opentsdb.tsd.BadRequestException;
 import net.spy.memcached.MemcachedClient;
@@ -56,7 +55,9 @@ import net.opentsdb.utils.DateTime;
 
   private static final Logger LOG = LoggerFactory.getLogger(TsdbQuery.class);
 
-  /** Used whenever there are no results. */
+  /**
+   * Used whenever there are no results.
+   */
   private static final DataPoints[] NO_RESULT = new DataPoints[0];
 
   /**
@@ -72,31 +73,49 @@ import net.opentsdb.utils.DateTime;
    */
   private static final Charset CHARSET = Charset.forName("ISO-8859-1");
 
-  /** The TSDB we belong to. */
+  /**
+   * The TSDB we belong to.
+   */
   private final TSDB tsdb;
 
-  /** The time, in ns, when we start scanning for data **/
+  /**
+   * The time, in ns, when we start scanning for data
+   **/
   private long scan_start_time;
 
-  /** Value used for timestamps that are uninitialized.  */
+  /**
+   * Value used for timestamps that are uninitialized.
+   */
   private static final int UNSET = -1;
 
-  /** Start time (UNIX timestamp in seconds) on 32 bits ("unsigned" int). */
+  /**
+   * Start time (UNIX timestamp in seconds) on 32 bits ("unsigned" int).
+   */
   private long start_time = UNSET;
 
-  /** End time (UNIX timestamp in seconds) on 32 bits ("unsigned" int). */
+  /**
+   * End time (UNIX timestamp in seconds) on 32 bits ("unsigned" int).
+   */
   private long end_time = UNSET;
 
-  /** Whether or not to delete the queried data */
+  /**
+   * Whether or not to delete the queried data
+   */
   private boolean delete;
 
-  /** ID of the metric being looked up. */
+  /**
+   * ID of the metric being looked up.
+   */
   private byte[] metric;
 
-  /** Row key regex to pass to HBase if we have tags or TSUIDs */
+  /**
+   * Row key regex to pass to HBase if we have tags or TSUIDs
+   */
   private String regex;
 
-  /** Whether or not to enable the fuzzy row filter for Hbase */
+  /**
+   * Whether or not to enable the fuzzy row filter for Hbase
+   */
   private boolean enable_fuzzy_filter;
 
   /**
@@ -111,54 +130,75 @@ import net.opentsdb.utils.DateTime;
    */
   private ByteMap<byte[][]> row_key_literals;
 
-  /** If true, use rate of change instead of actual values. */
+  /**
+   * If true, use rate of change instead of actual values.
+   */
   private boolean rate;
 
-  /** Specifies the various options for rate calculations */
+  /**
+   * Specifies the various options for rate calculations
+   */
   private RateOptions rate_options;
 
-  /** Aggregator function to use. */
+  /**
+   * Aggregator function to use.
+   */
   private Aggregator aggregator;
 
-  /** Downsampling specification to use, if any (can be {@code null}). */
+  /**
+   * Downsampling specification to use, if any (can be {@code null}).
+   */
   private DownsamplingSpecification downsampler;
 
-  /** Optional list of TSUIDs to fetch and aggregate instead of a metric */
+  /**
+   * Optional list of TSUIDs to fetch and aggregate instead of a metric
+   */
   private List<String> tsuids;
 
-  /** An index that links this query to the original sub query */
+  /**
+   * An index that links this query to the original sub query
+   */
   private int query_index;
 
-  /** Tag value filters to apply post scan */
+  /**
+   * Tag value filters to apply post scan
+   */
   private List<TagVFilter> filters;
 
-  /** An object for storing stats in regarding the query. May be null */
+  /**
+   * An object for storing stats in regarding the query. May be null
+   */
   private QueryStats query_stats;
 
-  /** Whether or not to match series with ONLY the given tags */
+  /**
+   * Whether or not to match series with ONLY the given tags
+   */
   private boolean explicit_tags;
 
-  /** Constructor. */
+  /**
+   * Constructor.
+   */
   public TsdbQuery(final TSDB tsdb) {
     this.tsdb = tsdb;
     enable_fuzzy_filter = tsdb.getConfig()
-        .getBoolean("tsd.query.enable_fuzzy_filter");
+      .getBoolean("tsd.query.enable_fuzzy_filter");
   }
 
   /**
    * Sets the start time for the query
+   *
    * @param timestamp Unix epoch timestamp in seconds or milliseconds
    * @throws IllegalArgumentException if the timestamp is invalid or greater
-   * than the end time (if set)
+   *                                  than the end time (if set)
    */
   @Override
   public void setStartTime(final long timestamp) {
     if (timestamp < 0 || ((timestamp & Const.SECOND_MASK) != 0 &&
-        timestamp > 9999999999999L)) {
+      timestamp > 9999999999999L)) {
       throw new IllegalArgumentException("Invalid timestamp: " + timestamp);
     } else if (end_time != UNSET && timestamp >= getEndTime()) {
       throw new IllegalArgumentException("new start time (" + timestamp
-          + ") is greater than or equal to end time: " + getEndTime());
+        + ") is greater than or equal to end time: " + getEndTime());
     }
     start_time = timestamp;
   }
@@ -178,23 +218,25 @@ import net.opentsdb.utils.DateTime;
   /**
    * Sets the end time for the query. If this isn't set, the system time will be
    * used when the query is executed or {@link #getEndTime} is called
+   *
    * @param timestamp Unix epoch timestamp in seconds or milliseconds
    * @throws IllegalArgumentException if the timestamp is invalid or less
-   * than the start time (if set)
+   *                                  than the start time (if set)
    */
   @Override
   public void setEndTime(final long timestamp) {
     if (timestamp < 0 || ((timestamp & Const.SECOND_MASK) != 0 &&
-        timestamp > 9999999999999L)) {
+      timestamp > 9999999999999L)) {
       throw new IllegalArgumentException("Invalid timestamp: " + timestamp);
     } else if (start_time != UNSET && timestamp <= getStartTime()) {
       throw new IllegalArgumentException("new end time (" + timestamp
-          + ") is less than or equal to start time: " + getStartTime());
+        + ") is less than or equal to start time: " + getStartTime());
     }
     end_time = timestamp;
   }
 
-  /** @return the configured end time. If the end time hasn't been set, the
+  /**
+   * @return the configured end time. If the end time hasn't been set, the
    * current system time will be stored and returned.
    */
   @Override
@@ -217,19 +259,19 @@ import net.opentsdb.utils.DateTime;
 
   @Override
   public void setTimeSeries(final String metric,
-      final Map<String, String> tags,
-      final Aggregator function,
-      final boolean rate) throws NoSuchUniqueName {
+                            final Map<String, String> tags,
+                            final Aggregator function,
+                            final boolean rate) throws NoSuchUniqueName {
     setTimeSeries(metric, tags, function, rate, new RateOptions());
   }
 
   @Override
   public void setTimeSeries(final String metric,
-        final Map<String, String> tags,
-        final Aggregator function,
-        final boolean rate,
-        final RateOptions rate_options)
-  throws NoSuchUniqueName {
+                            final Map<String, String> tags,
+                            final Aggregator function,
+                            final boolean rate,
+                            final RateOptions rate_options)
+    throws NoSuchUniqueName {
     if (filters == null) {
       filters = new ArrayList<TagVFilter>(tags.size());
     }
@@ -248,11 +290,11 @@ import net.opentsdb.utils.DateTime;
       if (e instanceof DeferredGroupException) {
         // rollback to the actual case. The DGE missdirects
         Throwable ex = e.getCause();
-        while(ex != null && ex instanceof DeferredGroupException) {
+        while (ex != null && ex instanceof DeferredGroupException) {
           ex = ex.getCause();
         }
         if (ex != null) {
-          throw (RuntimeException)ex;
+          throw (RuntimeException) ex;
         }
       }
       LOG.error("Unexpected exception processing group bys", e);
@@ -268,17 +310,17 @@ import net.opentsdb.utils.DateTime;
 
   @Override
   public void setTimeSeries(final List<String> tsuids,
-      final Aggregator function, final boolean rate) {
+                            final Aggregator function, final boolean rate) {
     setTimeSeries(tsuids, function, rate, new RateOptions());
   }
 
   @Override
   public void setTimeSeries(final List<String> tsuids,
-      final Aggregator function, final boolean rate,
-      final RateOptions rate_options) {
+                            final Aggregator function, final boolean rate,
+                            final RateOptions rate_options) {
     if (tsuids == null || tsuids.isEmpty()) {
       throw new IllegalArgumentException(
-          "Empty or missing TSUID list not allowed");
+        "Empty or missing TSUID list not allowed");
     }
 
     String first_metric = "";
@@ -314,7 +356,7 @@ import net.opentsdb.utils.DateTime;
 
   @Override
   public Deferred<Object> configureFromQuery(final TSQuery query,
-      final int index) {
+                                             final int index) {
     if (query.getQueries() == null || query.getQueries().isEmpty()) {
       throw new IllegalArgumentException("Missing sub queries");
     }
@@ -356,7 +398,7 @@ import net.opentsdb.utils.DateTime;
         if (!first_metric.equals(metric)) {
           throw new IllegalArgumentException(
             "One or more TSUIDs did not share the same metric [" + first_metric +
-            "] [" + metric + "]");
+              "] [" + metric + "]");
         }
       }
       return Deferred.fromResult(null);
@@ -377,7 +419,7 @@ import net.opentsdb.utils.DateTime;
           metric = uid;
           if (filters != null) {
             final List<Deferred<byte[]>> deferreds =
-                new ArrayList<Deferred<byte[]>>(filters.size());
+              new ArrayList<Deferred<byte[]>>(filters.size());
             for (final TagVFilter filter : filters) {
               deferreds.add(filter.resolveTagkName(tsdb));
             }
@@ -390,29 +432,30 @@ import net.opentsdb.utils.DateTime;
 
       // fire off the callback chain by resolving the metric first
       return tsdb.metrics.getIdAsync(sub_query.getMetric())
-          .addCallbackDeferring(new MetricCB());
+        .addCallbackDeferring(new MetricCB());
     }
   }
 
   @Override
   public void downsample(final long interval, final Aggregator downsampler,
-      final FillPolicy fill_policy) {
+                         final FillPolicy fill_policy) {
     this.downsampler = new DownsamplingSpecification(
-        interval, downsampler,fill_policy);
+      interval, downsampler, fill_policy);
   }
 
   /**
    * Sets an optional downsampling function with interpolation on this query.
-   * @param interval The interval, in milliseconds to rollup data points
+   *
+   * @param interval    The interval, in milliseconds to rollup data points
    * @param downsampler An aggregation function to use when rolling up data points
-   * @throws NullPointerException if the aggregation function is null
+   * @throws NullPointerException     if the aggregation function is null
    * @throws IllegalArgumentException if the interval is not greater than 0
    */
   @Override
   public void downsample(final long interval, final Aggregator downsampler) {
     if (downsampler == Aggregators.NONE) {
       throw new IllegalArgumentException("cannot use the NONE "
-          + "aggregator for downsampling");
+        + "aggregator for downsampling");
     }
     downsample(interval, downsampler, FillPolicy.NONE);
   }
@@ -463,7 +506,7 @@ import net.opentsdb.utils.DateTime;
         }
         next = look_ahead.hasNext() ? look_ahead.next() : null;
       } while (current_iterator.hasNext() &&
-          Bytes.memcmp(tagk, current.getTagkBytes()) == 0);
+        Bytes.memcmp(tagk, current.getTagkBytes()) == 0);
 
       if (gbs > 0) {
         if (group_bys == null) {
@@ -474,9 +517,9 @@ import net.opentsdb.utils.DateTime;
 
       if (literals.size() > 0) {
         if (literals.size() + row_key_literals_count >
-            tsdb.getConfig().getInt("tsd.query.filter.expansion_limit")) {
+          tsdb.getConfig().getInt("tsd.query.filter.expansion_limit")) {
           LOG.debug("Skipping literals for " + current.getTagk() +
-              " as it exceedes the limit");
+            " as it exceedes the limit");
         } else {
           final byte[][] values = new byte[literals.size()][];
           literals.keySet().toArray(values);
@@ -492,12 +535,14 @@ import net.opentsdb.utils.DateTime;
       }
     }
   }
+
   /**
    * Executes the query.
    * NOTE: Do not run the same query multiple times. Construct a new query with
    * the same parameters again if needed
    * TODO(cl) There are some strange occurrences when unit testing where the end
    * time, if not set, can change between calls to run()
+   *
    * @return An array of data points with one time series per array value
    */
   @Override
@@ -516,6 +561,14 @@ import net.opentsdb.utils.DateTime;
 //    return findSpans();
 //  }
 
+  public QueryStats getQueryStats() {
+    return query_stats;
+  }
+
+  public int getQueryIndex(){
+    return query_index;
+  }
+
   // Not like a clone, but duplicate create new query of TsdbQuery
   private TsdbQuery duplicate(){
     // TODO: (mildronize) manage query stats
@@ -533,12 +586,16 @@ import net.opentsdb.utils.DateTime;
 
     tsdbQuery.group_bys = group_bys;
     tsdbQuery.row_key_literals = row_key_literals;
+    tsdbQuery.query_stats = query_stats;
+    tsdbQuery.query_index = query_index;
 
     return tsdbQuery;
   }
 
-  public Deferred<TreeMap<byte[], Span>> findCache(final CacheFragment fragment){
+  public Deferred<TreeMap<byte[], Span>> findCache(final ArrayList<CacheFragment> fragments, final int cacheFragmentId){
     // finally the result is one object!
+    final long findCacheStart = DateTime.nanoTime();
+    final CacheFragment fragment = fragments.get(cacheFragmentId);
     final ArrayList<Deferred<byte[]>> deferreds = new ArrayList<Deferred<byte[]>>();
     final byte[] result_key;
 
@@ -609,7 +666,7 @@ import net.opentsdb.utils.DateTime;
 //        LOG.debug("FILTER: type?" + (filter.getType() == "literal_or"));
         // TODO: postScan, recheck of postScan is needed to use?
         if (filter.getType() == "literal_or") {
-          LOG.debug("findCache: OK FILTER: " + filter.toString());
+          if (LOG.isDebugEnabled())LOG.debug("findCache: OK FILTER: " + filter.toString());
           byte[] key_tmp = filter.getTagkBytes();
           List<byte[]> tagVUids = filter.getTagVUids();
           if(tagVUids.size() != 1){
@@ -642,7 +699,7 @@ import net.opentsdb.utils.DateTime;
     // add tag byte
 //    LOG.debug("findCache: Add tags into template: " + Arrays.toString(tags));
     System.arraycopy(tags, 0, keyBytesTemplate, metric_bytes + Const.TIMESTAMP_BYTES , tags.length);
-    LOG.debug("findCache: keyBytesTemplate: " + Arrays.toString(keyBytesTemplate));
+    if (LOG.isDebugEnabled())LOG.debug("findCache: keyBytesTemplate: " + Arrays.toString(keyBytesTemplate));
     final ArrayList<byte[]> keys = tsdb.cache.processKeyCache(fragment, keyBytesTemplate, metric_bytes);
     // Select first key of span as a key of the result
     if(keys.size() == 0){
@@ -661,11 +718,12 @@ import net.opentsdb.utils.DateTime;
       @Override
       public TreeMap<byte[], Span> call(final ArrayList<byte[]> raw_results) throws Exception{
         // merge each TreeMap together
+
         final short metric_width = tsdb.metrics.width();
         final TreeMap<byte[], Span> result_spans = // The key is a row key from HBase.
           new TreeMap<byte[], Span>(new SpanCmp(
             (short)(Const.SALT_WIDTH() + metric_width)));
-        LOG.debug("findCache.GroupFinisih.call: Span size (num of rowSeq): " + raw_results.size());
+        if (LOG.isDebugEnabled())LOG.debug("findCache.GroupFinisih.call: Span size (num of rowSeq): " + raw_results.size());
         // mildronize: debug
 //        final FileWriter fileWriter;
 //        final PrintWriter printWriter;
@@ -677,9 +735,16 @@ import net.opentsdb.utils.DateTime;
           // mildronize: debug
 //          printWriter.println(tsdb.cache.encodeKey(keys.get(i))+"#("+raw_results.get(i).length +")#"+ Arrays.toString(raw_results.get(i)) +"$");
         }
-        result_spans.put(result_key, tsdb.cache.deserializeToSpan(raw_results));
+        long deserializeStart = DateTime.nanoTime();
+        Span resultSpan = tsdb.cache.deserializeToSpan(raw_results);
+        if (query_stats != null)
+          query_stats.addCacheStat(cacheFragmentId, QueryStat.CACHE_UNSERIALIZATION_TIME, DateTime.nanoTime() - deserializeStart);
+
+        result_spans.put(result_key, resultSpan);
         memcachedClient.shutdown();
 //        printWriter.close();
+        if (query_stats != null)
+        query_stats.addCacheStat(cacheFragmentId, QueryStat.FIND_CACHE_TIME, DateTime.nanoTime() - findCacheStart);
         return result_spans;
       }
 
@@ -693,31 +758,40 @@ import net.opentsdb.utils.DateTime;
   }
 
   private Deferred<TreeMap<byte[], Span>> buildFragmentAsync(final ArrayList<CacheFragment> cacheFragments){
+    final TsdbQuery self = this;
     final ArrayList<Deferred<TreeMap<byte[], Span>>> deferreds = new ArrayList<Deferred<TreeMap<byte[], Span>>>();
 
     for (int i=0; i<cacheFragments.size() ;i++){
 
       if (cacheFragments.get(i).isInCache()) {  // true in cache
         LOG.info("buildFragmentAsync: Starting findCache for CacheFragment(" + i + ") -> " + cacheFragments.get(i));
-        deferreds.add(findCache(cacheFragments.get(i)));
+        if (query_stats!=null){
+          query_stats.addCacheStat(i, QueryStat.CACHE_FRAGMENTS_TYPE, 1);
+        }
+        deferreds.add(findCache(cacheFragments, i));
       }else{
+        if (query_stats!=null){
+          query_stats.addCacheStat(i, QueryStat.CACHE_FRAGMENTS_TYPE, 0);
+        }
         TsdbQuery fragmentTsdbQuery = this.duplicate();
         fragmentTsdbQuery.setStartTime(cacheFragments.get(i).getStartTime());
         fragmentTsdbQuery.setEndTime(cacheFragments.get(i).getEndTime());
         LOG.info("buildFragmentAsync: Starting findSpans for CacheFragment(" + i + ") -> " + cacheFragments.get(i));
-        deferreds.add(fragmentTsdbQuery.findSpans());
+        deferreds.add(fragmentTsdbQuery.findSpans(i));
       }
     }
     class MergeFragmentsCB implements Callback<TreeMap<byte[], Span>, ArrayList<TreeMap<byte[], Span>>> {
       @Override
       public TreeMap<byte[], Span> call(final ArrayList<TreeMap<byte[], Span>> spans) throws Exception{
         // merge each TreeMap together
+        long cacheMergeStart = DateTime.nanoTime();
+
         final short metric_width = tsdb.metrics.width();
         final TreeMap<byte[], Span> result_spans = // The key is a row key from HBase.
           new TreeMap<byte[], Span>(new SpanCmp(
             (short)(Const.SALT_WIDTH() + metric_width)));
 
-        LOG.debug("buildFragmentAsync.MergeFragmentsCB.call: Merge raw data -> GroupFinished: Span size: " + spans.size());
+        if (LOG.isDebugEnabled())LOG.debug("buildFragmentAsync.MergeFragmentsCB.call: Merge raw data -> GroupFinished: Span size: " + spans.size());
         // Remove span if it's null
         Iterator<TreeMap<byte[], Span>> spansIterator = spans.iterator();
         while (spansIterator.hasNext()) {
@@ -732,7 +806,7 @@ import net.opentsdb.utils.DateTime;
         for(final TreeMap<byte[], Span> span : spans) {
           if (span == null) continue;
           for (Map.Entry<byte[], Span> element : span.entrySet())
-            LOG.debug("buildFragmentAsync.MergeFragmentsCB.call: Fragment (Span) : " + element.getKey() + "["+ Arrays.toString(element.getKey()) + "]| Value: " + element.getValue().getRows().size() + " rows") ;
+            if (LOG.isDebugEnabled())LOG.debug("buildFragmentAsync.MergeFragmentsCB.call: Fragment (Span) : " + element.getKey() + "["+ Arrays.toString(element.getKey()) + "]| Value: " + element.getValue().getRows().size() + " rows") ;
 
           for(Map.Entry<byte[], Span> entry : span.entrySet()) {
 //            result_span.addAll(entry.getValue().getRows());
@@ -744,10 +818,16 @@ import net.opentsdb.utils.DateTime;
         result_span.addAll(new ArrayList<RowSeq>(rowSeqs_result));
         result_spans.put(result_key, result_span);
 
-        for (Map.Entry<byte[], Span> element : result_spans.entrySet())
-          LOG.debug("buildFragmentAsync.MergeFragmentsCB.call: Merged Span : " + element.getKey() + "["+ Arrays.toString(element.getKey()) + "]| Value: " + element.getValue().getRows().size() + " rows");
+        if (LOG.isDebugEnabled())
+          for (Map.Entry<byte[], Span> element : result_spans.entrySet())
+            if (LOG.isDebugEnabled())LOG.debug("buildFragmentAsync.MergeFragmentsCB.call: Merged Span : " + element.getKey() + "["+ Arrays.toString(element.getKey()) + "]| Value: " + element.getValue().getRows().size() + " rows");
 
+        if(self.getQueryStats() != null ) {
+          self.getQueryStats().addStat(self.getQueryIndex(),
+            QueryStat.CACHE_MERGE_TIME, DateTime.nanoTime() - cacheMergeStart);
+        }
         return result_spans;
+
       }
       @Override
       public String toString() {
@@ -766,7 +846,7 @@ import net.opentsdb.utils.DateTime;
             // store in memcache
             LOG.info("buildFragmentAsync: Starting store CacheFragment(" + i + ") -> " + cacheFragments.get(i));
             try {
-              deferreds.add(tsdb.cache.storeCache(cacheFragments.get(i), spans.get(i)));
+              deferreds.add(tsdb.cache.storeCache(cacheFragments, spans, query_stats, i));
             }catch (Exception e){
               LOG.warn("buildFragmentAsync.StoreCB.call: "+ e.getMessage());
             }
@@ -805,6 +885,10 @@ import net.opentsdb.utils.DateTime;
 //    return findSpans().addCallback(new GroupByAndAggregateCB());
   }
 
+
+  private Deferred<TreeMap<byte[], Span>> findSpans() throws HBaseException {
+   return findSpans(0);
+  }
   /**
    * Finds all the {@link Span}s that match this query.
    * This is what actually scans the HBase table and loads the data into
@@ -816,7 +900,7 @@ import net.opentsdb.utils.DateTime;
    * perform the search.
    * @throws IllegalArgumentException if bad data was retrieved from HBase.
    */
-  private Deferred<TreeMap<byte[], Span>> findSpans() throws HBaseException {
+  private Deferred<TreeMap<byte[], Span>> findSpans(final int cacheFragmentId) throws HBaseException {
     final short metric_width = tsdb.metrics.width();
     final TreeMap<byte[], Span> spans = // The key is a row key from HBase.
       new TreeMap<byte[], Span>(new SpanCmp(
@@ -1124,7 +1208,13 @@ import net.opentsdb.utils.DateTime;
          if (query_stats != null) {
            query_stats.addScannerStat(query_index, index,
                QueryStat.SCANNER_TIME, DateTime.nanoTime() - scan_start_time);
-
+          // Cache stat
+           query_stats.addCacheStat(cacheFragmentId,
+             QueryStat.FIND_SPAN_TIME, DateTime.nanoTime() - scan_start_time);
+           query_stats.addCacheStat(cacheFragmentId,
+             QueryStat.HBASE_TIME, fetch_time);
+           query_stats.addCacheStat(cacheFragmentId,
+             QueryStat.COMPACTION_TIME, compaction_time);
            // Scanner Stats
            /* Uncomment when AsyncHBase has this feature:
            query_stats.addScannerStat(query_index, index,
@@ -1153,6 +1243,7 @@ import net.opentsdb.utils.DateTime;
                QueryStat.UID_PAIRS_RESOLVED, uids_resolved);
            query_stats.addScannerStat(query_index, index,
                QueryStat.COMPACTION_TIME, compaction_time);
+
          }
 
          if (e != null) {
@@ -1191,7 +1282,7 @@ import net.opentsdb.utils.DateTime;
       if(set.size() < rowSeqs.size()){
         LOG.error("GroupByAndAggregateCB: There are duplicate_row");
       }
-      LOG.debug("GroupByAndAggregateCB: set:" + set.size() + " original: " + rowSeqs.size());
+      if (LOG.isDebugEnabled())LOG.debug("GroupByAndAggregateCB: set:" + set.size() + " original: " + rowSeqs.size());
     }
 
     @Override
@@ -1200,8 +1291,9 @@ import net.opentsdb.utils.DateTime;
       // Mildronize: Debug
 //      FileWriter fileWriter = new FileWriter("/var/log/opentsdb/RowSeq." + System.currentTimeMillis());
 //      PrintWriter printWriter = new PrintWriter(fileWriter);
-      for (Map.Entry<byte[], Span> entry : spans.entrySet()) {
-        LOG.debug("GroupByAndAggregateCB (Post-processing): Key: " + entry.getKey() + ". Value: " + entry.getValue().getRows().size() + " rows");
+      if (LOG.isDebugEnabled())
+        for (Map.Entry<byte[], Span> entry : spans.entrySet()) {
+          LOG.debug("GroupByAndAggregateCB (Post-processing): Key: " + entry.getKey() + ". Value: " + entry.getValue().getRows().size() + " rows");
 //        check_duplicate_row(entry.getValue().getRows());
 //        for (final RowSeq rowSeq: entry.getValue().getRows()) {
 //          String msg = Arrays.toString(rowSeq.getKey()) + " Value: " + Arrays.toString(rowSeq.getValues())+ " Qualifier: " + Arrays.toString(rowSeq.getQualifiers())+ " $";
