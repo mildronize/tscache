@@ -55,7 +55,7 @@ public class Cache {
   public static final short ROWSEQ_QUALIFIER_NUMBYTES = 2; //short
   public static final short ROWSEQ_VALUE_NUMBYTES = 2; //short
 
-  private static final short NUM_RANGE_SIZE = 64;
+  private static final int NUM_RANGE_SIZE = 256;
 
   private final String memcachedHost = "memcached";
   private final int memcachedPort = 11211;
@@ -72,10 +72,10 @@ public class Cache {
 
   public Cache(TSDB tsdb, int numRangeSize) {
     this(tsdb);
-    modifyNumRangeSize(NUM_RANGE_SIZE);
+    modifyNumRangeSize(numRangeSize);
   }
 
-  public void modifyNumRangeSize(short numRangeSize){
+  public void modifyNumRangeSize(int numRangeSize){
     this.numRangeSize = numRangeSize;
     LOG.warn("num of range size (Cache) is changed: " + numRangeSize);
   }
@@ -104,6 +104,8 @@ public class Cache {
   }
 
   public ArrayList<CacheFragment> buildCacheFragmentsFromBits(ArrayList<Long> results, int startFragmentOrder, int endFragmentOrder, int indexSize) throws Exception{
+    // TODO: super hot fix
+    startFragmentOrder = startFragmentOrder - 1;
     int startQueryBlockOrder = lookupTable.calcBlockOrder(startFragmentOrder);
     int endQueryBlockOrder = lookupTable.calcBlockOrder(endFragmentOrder);
     ArrayList<CacheFragment> fragments = new ArrayList<CacheFragment>();

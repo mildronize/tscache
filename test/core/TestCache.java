@@ -61,7 +61,8 @@ public final class TestCache extends BaseTsdbTest {
     assertEquals(1, c.startTimeToFragmentOrder(0));
     assertEquals(1, c.startTimeToFragmentOrder(3600000));
     assertEquals(1, c.startTimeToFragmentOrder(7199000));
-    assertEquals(2, c.startTimeToFragmentOrder(7200000));
+    assertEquals(1, c.startTimeToFragmentOrder(7200000));
+    assertEquals(2, c.startTimeToFragmentOrder(7200001));
     assertEquals(0, c.fragmentOrderToStartTime(0));
     assertEquals(7200000, c.fragmentOrderToStartTime(1));
     assertEquals(14400000, c.fragmentOrderToStartTime(2));

@@ -758,6 +758,7 @@ import net.opentsdb.utils.DateTime;
   }
 
   private Deferred<TreeMap<byte[], Span>> buildFragmentAsync(final ArrayList<CacheFragment> cacheFragments){
+    final long scannerWithCacheStart = DateTime.nanoTime();
     final TsdbQuery self = this;
     final ArrayList<Deferred<TreeMap<byte[], Span>>> deferreds = new ArrayList<Deferred<TreeMap<byte[], Span>>>();
 
@@ -785,7 +786,12 @@ import net.opentsdb.utils.DateTime;
       public TreeMap<byte[], Span> call(final ArrayList<TreeMap<byte[], Span>> spans) throws Exception{
         // merge each TreeMap together
         long cacheMergeStart = DateTime.nanoTime();
-
+//        LOG.error(self.getQueryStats() + "");
+        if (self.getQueryStats() != null) {
+          for (int i = 0; i < cacheFragments.size(); i++) {
+            self.getQueryStats().addCacheStat(i, QueryStat.IS_CACHE_FRAGMENTS_FAILED, cacheFragments.get(i).isFailed() ? 1 : 0);
+          }
+        }
         final short metric_width = tsdb.metrics.width();
         final TreeMap<byte[], Span> result_spans = // The key is a row key from HBase.
           new TreeMap<byte[], Span>(new SpanCmp(
@@ -825,6 +831,8 @@ import net.opentsdb.utils.DateTime;
         if(self.getQueryStats() != null ) {
           self.getQueryStats().addStat(self.getQueryIndex(),
             QueryStat.CACHE_MERGE_TIME, DateTime.nanoTime() - cacheMergeStart);
+          self.getQueryStats().addStat(self.getQueryIndex(),
+            QueryStat.CACHE_SCANNER_TIME, DateTime.nanoTime() - scannerWithCacheStart);
         }
         return result_spans;
 

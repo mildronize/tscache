@@ -163,6 +163,8 @@ public class QueryStats {
     BUILD_CACHE_FRAGMENTS_TIME ("buildCacheFragmentsTime", true),
     STORE_CACHE_TIME ("storeCacheTime", true),
     FIND_CACHE_TIME ("findCacheTime", true),
+    IS_CACHE_FRAGMENTS_FAILED ("isCacheFragmentsFailed", false),
+    CACHE_SCANNER_TIME ("cacheScannerTime", true),
     // SCANNER_TIME == FIND_SPAN_TIME
     FIND_SPAN_TIME ("findSpanTime", true),
 
@@ -907,12 +909,15 @@ public class QueryStats {
     // get Cache stat
     final Iterator<Entry<Integer, Map<QueryStat, Long>>> it =
       cache_stats.entrySet().iterator();
+
+    final Map<String, Object> cache_maps = new TreeMap<String, Object>();
+
+    query_map.put("CacheFragmentStats", cache_maps);
     while (it.hasNext()) {
       final Entry<Integer, Map<QueryStat, Long>> entry = it.next();
-      final Map<String, Object> qs1 = new HashMap<String, Object>(1);
-      qs1.put(String.format("CacheFragmentIdx_%02d", entry.getKey()),
+//      final Map<String, Object> qs1 = new HashMap<String, Object>(1);
+      cache_maps.put(String.format("CacheFragmentIdx_%02d", entry.getKey()),
         getCacheStats(entry.getKey()));
-      query_map.putAll(qs1);
     }
 
     return query_map;

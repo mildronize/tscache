@@ -197,13 +197,13 @@ public class CacheLookupTable {
           ^ cacheIndexes.get(i).longValue()
         ));
     }
-
     return result;
   }
 
 
   public ArrayList<Long> buildFragmentBits(int startFragmentOrder, int endFragmentOrder) {
-
+    // TODO: super hot fix
+    startFragmentOrder = startFragmentOrder - 1;
     LOG.info("buildFragmentBits: Start buildFragmentBits from "+startFragmentOrder+" to " + endFragmentOrder);
     ArrayList<Long> queryIndexes = convertToQueryIndexes(startFragmentOrder, endFragmentOrder);
     int startQueryBlockOrder = calcBlockOrder(startFragmentOrder);
