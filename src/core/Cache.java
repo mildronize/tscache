@@ -103,12 +103,22 @@ public class Cache {
     return false;
   }
 
+  public int calcEndFOBlock(int current_blockOrder, int result_size, int endFragmentOrder, int indexSize ){
+    //endFOBlock is in range = 0 - 63
+    // For buildCacheFragmentsFromBits method
+    return( current_blockOrder == result_size - 1 ) ? endFragmentOrder % indexSize : indexSize - 1;
+  }
+
   public ArrayList<CacheFragment> buildCacheFragmentsFromBits(ArrayList<Long> results, int startFragmentOrder, int endFragmentOrder, int indexSize) throws Exception{
     // TODO: super hot fix
-    startFragmentOrder = startFragmentOrder - 1;
+    //startFragmentOrder = startFragmentOrder - 1;
     int startQueryBlockOrder = lookupTable.calcBlockOrder(startFragmentOrder);
     int endQueryBlockOrder = lookupTable.calcBlockOrder(endFragmentOrder);
     ArrayList<CacheFragment> fragments = new ArrayList<CacheFragment>();
+    if (results.size() == 0) {
+      LOG.info("No cache fragment ( query range is too short!)");
+      return fragments;
+    }
     boolean currentCachedState; // true means in cache;
     boolean previousBit; // 0 or false means in cache;
     boolean currentBit; // 0 or false means in cache;
@@ -130,8 +140,8 @@ public class Cache {
     // -------------------------------------------------------------------------------
     for(int i = 0; i < results.size() ; i++){
       if (i != 0 ) startFOBlock = 0;
-      endFOBlock = ( i == results.size() - 1 ) ? endFragmentOrder % indexSize : indexSize;
-      for(int j = startFOBlock; j < endFOBlock ; j++ ){
+      endFOBlock = calcEndFOBlock(i, results.size(), endFragmentOrder, indexSize );
+      for(int j = startFOBlock; j <= endFOBlock ; j++ ){
         currentBit = getBitBoolean(results.get(i).longValue(), j, indexSize);
         // toggle state
         if(currentBit != previousBit){
@@ -158,27 +168,38 @@ public class Cache {
     return fragments;
   }
 
+  private ArrayList<CacheFragment> TsdbQueryToCacheFragments(TsdbQuery tsdbQuery){
+    ArrayList<CacheFragment> cacheFragments;
+    cacheFragments = new ArrayList<CacheFragment>();
+    cacheFragments.add(new CacheFragment(tsdbQuery.getStartTime(), tsdbQuery.getEndTime(), false));
+    return cacheFragments;
+  }
+
   public ArrayList<CacheFragment> buildCacheFragments(TsdbQuery tsdbQuery){
     // Decision
-    int statIsFirstMiss;
+    int statIsFirstMiss = 0;
+    int statIsFragmentTooSmall = 0;
     // Stat in nanoseconds
     final long buildCacheFragmentsStart = DateTime.nanoTime();
     ArrayList<CacheFragment> cacheFragments;
+
+    // XOR operation for finding which part in cache or not?
+    int start_fo = startTimeToFragmentOrder(tsdbQuery.getStartTime());
+    // Including the end of fragment order
+    int end_fo = endTimeToFragmentOrder(tsdbQuery.getEndTime()) - 1;
+    LOG.debug("buildCacheFragments - Start FO: " + start_fo +  "( " +tsdbQuery.getStartTime()+")");
+    LOG.debug("buildCacheFragments - End   FO: " + end_fo +  "( " +tsdbQuery.getEndTime()+")");
+
     // First miss
     if(lookupTable.isEmpty()) {
       LOG.info("First Miss");
       statIsFirstMiss = 1;
-      cacheFragments = new ArrayList<CacheFragment>();
-      cacheFragments.add(new CacheFragment(tsdbQuery.getStartTime(), tsdbQuery.getEndTime(), false));
-    }else {
-      statIsFirstMiss = 0;
-      // XOR operation for finding which part in cache or not?
-      int start_fo = startTimeToFragmentOrder(tsdbQuery.getStartTime());
-      // Including the end of fragment order
-      int end_fo = endTimeToFragmentOrder(tsdbQuery.getEndTime()) - 1;
-
-      LOG.debug("buildCacheFragments - Start FO: " + start_fo +  "( " +tsdbQuery.getStartTime()+")");
-      LOG.debug("buildCacheFragments - End   FO: " + end_fo +  "( " +tsdbQuery.getEndTime()+")");
+      cacheFragments = TsdbQueryToCacheFragments(tsdbQuery);
+    }else if ( start_fo > end_fo){
+      LOG.info("fragment is too small, ignore cache");
+      statIsFragmentTooSmall = 1;
+      cacheFragments = TsdbQueryToCacheFragments(tsdbQuery);
+    }else{
 
       // Build body
       ArrayList<Long> results = lookupTable.buildFragmentBits(start_fo, end_fo);
@@ -188,6 +209,11 @@ public class Cache {
       }catch(Exception e){
         LOG.error("buildCacheFragments: " + e.getMessage());
         return null;
+      }
+
+      LOG.debug("buildCacheFragments: List of CacheFragment (Before process):");
+      for(int i = 0; i < cacheFragments.size(); i++){
+        LOG.debug("buildCacheFragments: CacheFragment(" +cacheFragments.get(i)+ ")" + cacheFragments.get(i).toString());
       }
 
       // add head (not in cache) if exist
@@ -233,6 +259,11 @@ public class Cache {
     for(int i = 0; i < cacheFragments.size(); i++){
       LOG.info("buildCacheFragments: CacheFragment(" +cacheFragments.get(i)+ ")" + cacheFragments.get(i).toString());
     }
+    LOG.info("buildCacheFragments: List of CacheFragment (FO):");
+    for(int i = 0; i < cacheFragments.size(); i++){
+      LOG.info("buildCacheFragments: CacheFragment(" +timeToFragmentOrder(cacheFragments.get(i).getStartTime())+ ","+ timeToFragmentOrder(cacheFragments.get(i).getEndTime()) +")" + cacheFragments.get
+        (i).toString());
+    }
 
     if (tsdbQuery.getQueryStats() != null) {
 //      tsdbQuery.getQueryStats().addScannerStat(tsdbQuery.getQueryIndex(), 0,
@@ -241,6 +272,8 @@ public class Cache {
 //        QueryStats.QueryStat.NUMBER_CACHE_FRAGMENTS, cacheFragments.size());
       tsdbQuery.getQueryStats().addStat( tsdbQuery.getQueryIndex(),
         QueryStats.QueryStat.IS_FIRST_MISS, statIsFirstMiss);
+      tsdbQuery.getQueryStats().addStat( tsdbQuery.getQueryIndex(),
+        QueryStats.QueryStat.IS_FRAGMENT_TOO_SMALL, statIsFragmentTooSmall);
       tsdbQuery.getQueryStats().addStat( tsdbQuery.getQueryIndex(),
         QueryStats.QueryStat.NUMBER_CACHE_FRAGMENTS, cacheFragments.size());
       tsdbQuery.getQueryStats().addStat( tsdbQuery.getQueryIndex(),

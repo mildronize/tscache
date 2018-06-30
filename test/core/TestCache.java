@@ -20,6 +20,16 @@ import static org.junit.Assert.fail;
 public final class TestCache extends BaseTsdbTest {
 
 
+
+  @Test
+  public void calcEndFOBlock() throws Exception {
+    assertEquals(tsdb.cache.calcEndFOBlock(0, 2, 70,64), 63);
+    assertEquals(tsdb.cache.calcEndFOBlock(1, 3, 80,64), 63);
+    assertEquals(tsdb.cache.calcEndFOBlock(1, 2, 70,64), 6);
+    assertEquals(tsdb.cache.calcEndFOBlock(2, 3, 80,64), 16);
+
+  }
+
   @Test
   public void getBitBoolean() throws Exception {
     assertEquals(tsdb.cache.getBitBoolean(0b0100000000000000000000000000000000000000000000000000000000000000L, 2, 64), false);
@@ -61,7 +71,7 @@ public final class TestCache extends BaseTsdbTest {
     assertEquals(1, c.startTimeToFragmentOrder(0));
     assertEquals(1, c.startTimeToFragmentOrder(3600000));
     assertEquals(1, c.startTimeToFragmentOrder(7199000));
-    assertEquals(1, c.startTimeToFragmentOrder(7200000));
+    assertEquals(2, c.startTimeToFragmentOrder(7200000));
     assertEquals(2, c.startTimeToFragmentOrder(7200001));
     assertEquals(0, c.fragmentOrderToStartTime(0));
     assertEquals(7200000, c.fragmentOrderToStartTime(1));
@@ -90,6 +100,11 @@ public final class TestCache extends BaseTsdbTest {
     assertEquals(2, c.endTimeToFragmentOrder(21599999));
     assertEquals(3, c.endTimeToFragmentOrder(21600000));
     assertEquals(3, c.endTimeToFragmentOrder(28799999));
+
+    Cache c256 = new Cache(tsdb, 256);
+    assertEquals(344, c256.endTimeToFragmentOrder(317675657000L));
+    assertEquals(345, c256.endTimeToFragmentOrder(318675657000L));
+
   }
 
   @Test
@@ -100,6 +115,32 @@ public final class TestCache extends BaseTsdbTest {
     assertEquals(21599999, c.fragmentOrderToEndTime(2));
     assertEquals(28799999, c.fragmentOrderToEndTime(3));
   }
+
+//  @Test
+//  public void buildFragmentsFromBits_start_fo_one() throws Exception{
+//    Cache c = tsdb.cache;
+//    ArrayList<Long> results = new ArrayList<Long>();
+//    // 0 or false means in cache;
+//    results.add(new Long(0b0111111111111111111111111111111111111111111111111111111111111111L));
+//    results.add(new Long(0b1111111111111111111111111111111111111111111111111111111111111111L));
+//    results.add(new Long(0b1111111111111111111111111111111111111111111111111111111111111111L));
+//    results.add(new Long(0b1111111111111111111111111111111111111111111111111111111111111111L));
+//    results.add(new Long(0b1111111111111111111111111111111111111111111111111111111111111111L));
+//    results.add(new Long(0b1111111111111111111111111111111111111111111111111111111111111111L));
+//    results.add(new Long(0b1111111111111111111111101000000000000000000000000000000000000000L));
+//    // end                                             e
+//    ArrayList<CacheFragment> expected = new ArrayList<CacheFragment>();
+//    expected.add(new CacheFragment(c.fragmentOrderToStartTime(0),c.fragmentOrderToEndTime(53), true));
+//    expected.add(new CacheFragment(c.fragmentOrderToStartTime(54),c.fragmentOrderToEndTime(63), false));
+//
+//    ArrayList<CacheFragment> actual = c.buildCacheFragmentsFromBits(results, 1, 343,64);
+//    assertEquals(expected.size(), actual.size());
+//
+//    for(int i =0;i< expected.size();i++){
+//      System.out.println(i);
+//      assertTrue(expected.get(i).compareTo(actual.get(i)));
+//    }
+//  }
 
 
   @Test

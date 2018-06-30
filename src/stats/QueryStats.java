@@ -155,6 +155,7 @@ public class QueryStats {
 
     // Cache stats
     IS_FIRST_MISS ("isFirstMiss", false),
+    IS_FRAGMENT_TOO_SMALL ("isFragmentTooSmall", false),
     NUMBER_CACHE_FRAGMENTS ("numberCacheFragments", false),
     CACHE_FRAGMENTS_TYPE ("cacheFragmentsType", false),
     CACHE_SERIALIZATION_TIME ("cacheSerializationTime", true),

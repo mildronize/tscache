@@ -203,20 +203,26 @@ public class CacheLookupTable {
 
   public ArrayList<Long> buildFragmentBits(int startFragmentOrder, int endFragmentOrder) {
     // TODO: super hot fix
-    startFragmentOrder = startFragmentOrder - 1;
+//    startFragmentOrder = startFragmentOrder - 1;
     LOG.info("buildFragmentBits: Start buildFragmentBits from "+startFragmentOrder+" to " + endFragmentOrder);
     ArrayList<Long> queryIndexes = convertToQueryIndexes(startFragmentOrder, endFragmentOrder);
+    ArrayList<Long> result = new ArrayList<Long>();
+
     int startQueryBlockOrder = calcBlockOrder(startFragmentOrder);
     int endQueryBlockOrder = calcBlockOrder(endFragmentOrder);
+
+    if (startQueryBlockOrder >= queryIndexes.size()){
+      LOG.info("No cache fragment ( query range is too short!)");
+      return result;
+    }
+
     if(LOG.isDebugEnabled())LOG.debug("buildFragmentBits: startQueryBlockOrder = " + startQueryBlockOrder + " cacheIndexes.size():" +cacheIndexes.size() + " queryIndexes.size():" +queryIndexes.size());
     if(LOG.isDebugEnabled())LOG.debug("buildFragmentBits: QueryIndexes: " + printIndexes(queryIndexes, startQueryBlockOrder, endQueryBlockOrder));
     if(LOG.isDebugEnabled())LOG.debug("buildFragmentBits: CacheIndexes: " + printIndexes(cacheIndexes, 0, cacheIndexes.size()-1));
-    ArrayList<Long> result;
 
     if(startQueryBlockOrder > cacheIndexes.size() -  1){
       // If query and cache isn't overlapping
       LOG.info("buildFragmentBits: query and cache isn't overlapping");
-      result = new ArrayList<Long>();
       for(int i = startQueryBlockOrder ; i <= endQueryBlockOrder; i++){
         result.add(fulfillBlock());
       }
@@ -238,7 +244,7 @@ public class CacheLookupTable {
     }
 
     //    Note: No head adding
-//    LOG.debug("buildFragmentBit: Result:     " + printIndexes(result));
+    LOG.debug("buildFragmentBit: Result:     " + printIndexes(result));
     return result;
 
   }
