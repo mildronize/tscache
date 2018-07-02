@@ -84,6 +84,11 @@ import net.opentsdb.utils.DateTime;
   private long scan_start_time;
 
   /**
+   * The time, in ns, when we start scanning for data (including cache mechanism)
+   **/
+  private long scan_cache_start_time;
+
+  /**
    * Value used for timestamps that are uninitialized.
    */
   private static final int UNSET = -1;
@@ -887,6 +892,7 @@ import net.opentsdb.utils.DateTime;
 
   @Override
   public Deferred<DataPoints[]> runAsync() throws HBaseException {
+    scan_cache_start_time = DateTime.nanoTime();
     return buildFragmentAsync(tsdb.cache.buildCacheFragments(this))
       .addCallback(new GroupByAndAggregateCB());
     // Without Cache
@@ -1325,6 +1331,8 @@ import net.opentsdb.utils.DateTime;
       if (query_stats != null) {
         query_stats.addStat(query_index, QueryStat.QUERY_SCAN_TIME,
                 (System.nanoTime() - TsdbQuery.this.scan_start_time));
+        query_stats.addStat(query_index, QueryStat.CACHE_QUERY_SCAN_TIME,
+          (System.nanoTime() - TsdbQuery.this.scan_cache_start_time));
       }
 
       if (spans == null || spans.size() <= 0) {

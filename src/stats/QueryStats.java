@@ -173,6 +173,7 @@ public class QueryStats {
     SCANNER_MERGE_TIME ("saltScannerMergeTime", true),
     
     // Post Scan stats
+    CACHE_QUERY_SCAN_TIME ("cacheQueryScanTime", true),
     QUERY_SCAN_TIME ("queryScanTime", true),
     GROUP_BY_TIME ("groupByTime", true),
     
