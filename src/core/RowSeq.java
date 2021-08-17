@@ -44,6 +44,7 @@ final class RowSeq implements DataPoints {
   /** First row key. */
   byte[] key;
 
+
   /**
    * Qualifiers for individual data points.
    * <p>
@@ -481,7 +482,7 @@ final class RowSeq implements DataPoints {
        .append(base_time)
        .append(" (")
        .append(base_time > 0 ? new Date(base_time * 1000) : "no date")
-       .append(")");    
+       .append(")");
     // TODO - fix this so it doesn't cause infinite recursions. If longValue()
     // throws an exception, the exception will call this method, trying to get
     // longValue() again, which will throw another exception.... For now, just
@@ -489,7 +490,7 @@ final class RowSeq implements DataPoints {
     //for (short i = 0; i < size; i++) {
     //  final short qual = (short) Bytes.getUnsignedShort(qualifiers, i * 2);
     //  buf.append('+').append((qual & 0xFFFF) >>> Const.FLAG_BITS);
-    //  
+    //
     //  if (isInteger(i)) {
     //    buf.append(":long(").append(longValue(i));
     //  } else {
@@ -680,4 +681,63 @@ final class RowSeq implements DataPoints {
   public int getQueryIndex() {
     throw new UnsupportedOperationException("Not mapped to a query");
   }
+
+
+  // Mildronize: TSCache
+
+  public void setKey(byte[] key) {
+    this.key = key;
+  }
+  public void setQualifiers(byte[] qualifiers) {
+    this.qualifiers = qualifiers;
+  }
+  public void setValues(byte[] values) {
+    this.values = values;
+  }
+
+  public byte[] getKey() {
+    return key;
+  }
+  public byte[] getQualifiers() {
+    return qualifiers;
+  }
+  public byte[] getValues() {
+    return values;
+  }
+
+  // For set collection
+
+  @Override
+  public int hashCode(){
+    int result = 17;
+    for (final byte k : key) {
+      result = 31 * result + k;
+    }
+    return result;
+  }
+
+  @Override
+  public boolean equals(Object obj) {
+    if (this == obj)
+      return true;
+    if (obj == null)
+      return false;
+    if (!( obj instanceof RowSeq))
+      return false;
+    final RowSeq other = (RowSeq) obj;
+    // Firstly compare only time stamp
+    int offset = Const.SALT_WIDTH() + tsdb.metrics.width() - 1;
+    int size = other.getKey().length < key.length? other.getKey().length: key.length;
+    for (int i = offset;i < size ;i++) {
+      if(other.getKey()[i] != key[i])
+        return false;
+    }
+    // for All Bytes in key
+    for (int i = 0 ;i < offset ;i++) {
+      if(other.getKey()[i] != key[i])
+        return false;
+    }
+    return true;
+  }
+
 }

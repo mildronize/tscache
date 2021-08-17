@@ -557,6 +557,7 @@ public final class TestQueryRpc {
     final String json = 
         query.response().getContent().toString(Charset.forName("UTF-8"));
     assertTrue(json.contains("No such name for 'foo': 'metrics'"));
+
   }
   
   @Test

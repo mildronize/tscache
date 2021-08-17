@@ -38,6 +38,17 @@ final class Span implements DataPoints {
   /** The {@link TSDB} instance we belong to. */
   private final TSDB tsdb;
 
+  public ArrayList<RowSeq> getRows() {
+    return rows;
+  }
+
+  public boolean addRowSeq(RowSeq rowSeq) {
+    return rows.add(rowSeq);
+  }
+  public boolean addAll(ArrayList<RowSeq> rowSeqs) {
+    return rows.addAll(rowSeqs);
+  }
+
   /** All the rows in this span. */
   private final ArrayList<RowSeq> rows = new ArrayList<RowSeq>();
 

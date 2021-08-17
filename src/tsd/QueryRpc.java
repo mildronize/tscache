@@ -21,6 +21,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
+import net.opentsdb.core.*;
 import org.hbase.async.HBaseException;
 import org.hbase.async.RpcTimedOutException;
 import org.hbase.async.Bytes.ByteMap;
@@ -34,15 +35,6 @@ import com.stumbleupon.async.Callback;
 import com.stumbleupon.async.Deferred;
 import com.stumbleupon.async.DeferredGroupException;
 
-import net.opentsdb.core.DataPoints;
-import net.opentsdb.core.IncomingDataPoint;
-import net.opentsdb.core.Query;
-import net.opentsdb.core.QueryException;
-import net.opentsdb.core.RateOptions;
-import net.opentsdb.core.TSDB;
-import net.opentsdb.core.TSQuery;
-import net.opentsdb.core.TSSubQuery;
-import net.opentsdb.core.Tags;
 import net.opentsdb.meta.Annotation;
 import net.opentsdb.meta.TSUIDQuery;
 import net.opentsdb.query.expression.ExpressionTree;
@@ -54,6 +46,7 @@ import net.opentsdb.uid.NoSuchUniqueName;
 import net.opentsdb.uid.UniqueId;
 import net.opentsdb.utils.DateTime;
 import net.opentsdb.utils.JSON;
+
 
 /**
  * Handles queries for timeseries datapoints. Each request is parsed into a
@@ -73,7 +66,7 @@ final class QueryRpc implements HttpRpc {
   static final AtomicLong query_invalid = new AtomicLong();
   static final AtomicLong query_exceptions = new AtomicLong();
   static final AtomicLong query_success = new AtomicLong();
-  
+
   /**
    * Implements the /api/query endpoint to fetch data from OpenTSDB.
    * @param tsdb The TSDB to use for fetching data
@@ -98,8 +91,33 @@ final class QueryRpc implements HttpRpc {
     }
     
     final String[] uri = query.explodeAPIPath();
-    final String endpoint = uri.length > 1 ? uri[1] : ""; 
-    
+    final String endpoint = uri.length > 1 ? uri[1] : "";
+
+
+    // // Mildronize: Decide for using cache
+    // // split blah blah
+    // final ArrayList<DataPoints[]> results = new ArrayList<DataPoints[]>(nqueries);  // share result's ArrayList with all sub queries
+    // cache = new Cache(query);   // HttpQuery query
+    // // fragments = cache.getSubQueries()  // return with Map<HttpQuery, ArrayList<DataPoints[]>>
+    // fragments = cache.getFragments() // return ArrayList<CacheFragment> // implement CacheFragment which contains HttpQuery, ArrayList<DataPoints[]>
+    // // Call... getDataPointsFromQuery() + sendData() === handleQuery()
+    // // Serialization and send data to users, using last section of handleQuery()
+
+    // getDataPointsFromQuery() returns DataPoints[]
+
+    // // Originally, call `handleQuery(tsdb, query, false);`
+    // TODO: Refactor to Asynchronous Call
+    // for (fragment in fragments){
+    //      if (fragment.dataPoints == null )
+    //        results.addAll(getDataPointsFromQuery(tsdb, fragment.subQuery, false));
+    //      else
+    //        results.addAll(fragment.dataPoints)
+    // }
+
+    // sendData()
+
+
+
     if (endpoint.toLowerCase().equals("last")) {
       handleLastDataPointQuery(tsdb, query);
     } else if (endpoint.toLowerCase().equals("gexp")){
@@ -141,9 +159,9 @@ final class QueryRpc implements HttpRpc {
       expressions = new ArrayList<ExpressionTree>();
       data_query = parseQuery(tsdb, query, expressions);
     }
-    
+
     if (query.getAPIMethod() == HttpMethod.DELETE &&
-        tsdb.getConfig().getBoolean("tsd.http.query.allow_delete")) {
+      tsdb.getConfig().getBoolean("tsd.http.query.allow_delete")) {
       data_query.setDelete(true);
     }
     
@@ -257,6 +275,7 @@ final class QueryRpc implements HttpRpc {
         switch (query.apiVersion()) {
         case 0:
         case 1:
+           // Mildronize: Last section before sending data points to users
             query.serializer().formatQueryAsyncV1(data_query, results, 
                globals).addCallback(new SendIt()).addErrback(new ErrorCB());
           break;
@@ -294,7 +313,9 @@ final class QueryRpc implements HttpRpc {
         return data_query.buildQueriesAsync(tsdb).addCallback(new BuildCB());
       }
     }
- 
+
+    // Mildronize: Starting to query
+
     // if we the caller wants to search for global annotations, fire that off 
     // first then scan for the notes, then pass everything off to the formatter
     // when complete
@@ -306,6 +327,7 @@ final class QueryRpc implements HttpRpc {
       data_query.buildQueriesAsync(tsdb).addCallback(new BuildCB())
         .addErrback(new ErrorCB());
     }
+
   }
   
   /**

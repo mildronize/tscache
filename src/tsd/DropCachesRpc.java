@@ -84,5 +84,6 @@ public final class DropCachesRpc implements TelnetRpc, HttpRpc {
     private void dropCaches(final TSDB tsdb, final Channel chan) {
         LOG.warn(chan + " Dropping all in-memory caches.");
         tsdb.dropCaches();
+        tsdb.cache.dropCaches();
     }
 }

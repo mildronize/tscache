@@ -12,18 +12,18 @@
 // see <http://www.gnu.org/licenses/>.
 package net.opentsdb.core;
 
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.PrintWriter;
+import java.net.InetSocketAddress;
 import java.nio.charset.Charset;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.TreeMap;
+import java.util.*;
 
+import net.opentsdb.tree.Tree;
+import net.opentsdb.tsd.BadRequestException;
+import net.spy.memcached.MemcachedClient;
+import org.apache.commons.math3.analysis.function.Exp;
+import org.jboss.netty.handler.codec.http.HttpResponseStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.hbase.async.Bytes;
@@ -51,11 +51,13 @@ import net.opentsdb.utils.DateTime;
 /**
  * Non-synchronized implementation of {@link Query}.
  */
-final class TsdbQuery implements Query {
+  final class TsdbQuery implements Query {
 
   private static final Logger LOG = LoggerFactory.getLogger(TsdbQuery.class);
 
-  /** Used whenever there are no results. */
+  /**
+   * Used whenever there are no results.
+   */
   private static final DataPoints[] NO_RESULT = new DataPoints[0];
 
   /**
@@ -71,33 +73,56 @@ final class TsdbQuery implements Query {
    */
   private static final Charset CHARSET = Charset.forName("ISO-8859-1");
 
-  /** The TSDB we belong to. */
+  /**
+   * The TSDB we belong to.
+   */
   private final TSDB tsdb;
-  
-  /** The time, in ns, when we start scanning for data **/
+
+  /**
+   * The time, in ns, when we start scanning for data
+   **/
   private long scan_start_time;
 
-  /** Value used for timestamps that are uninitialized.  */
+  /**
+   * The time, in ns, when we start scanning for data (including cache mechanism)
+   **/
+  private long scan_cache_start_time;
+
+  /**
+   * Value used for timestamps that are uninitialized.
+   */
   private static final int UNSET = -1;
 
-  /** Start time (UNIX timestamp in seconds) on 32 bits ("unsigned" int). */
+  /**
+   * Start time (UNIX timestamp in seconds) on 32 bits ("unsigned" int).
+   */
   private long start_time = UNSET;
 
-  /** End time (UNIX timestamp in seconds) on 32 bits ("unsigned" int). */
+  /**
+   * End time (UNIX timestamp in seconds) on 32 bits ("unsigned" int).
+   */
   private long end_time = UNSET;
-  
-  /** Whether or not to delete the queried data */
+
+  /**
+   * Whether or not to delete the queried data
+   */
   private boolean delete;
 
-  /** ID of the metric being looked up. */
+  /**
+   * ID of the metric being looked up.
+   */
   private byte[] metric;
-  
-  /** Row key regex to pass to HBase if we have tags or TSUIDs */
+
+  /**
+   * Row key regex to pass to HBase if we have tags or TSUIDs
+   */
   private String regex;
-  
-  /** Whether or not to enable the fuzzy row filter for Hbase */
+
+  /**
+   * Whether or not to enable the fuzzy row filter for Hbase
+   */
   private boolean enable_fuzzy_filter;
-  
+
   /**
    * Tags by which we must group the results.
    * Each element is a tag ID.
@@ -110,54 +135,75 @@ final class TsdbQuery implements Query {
    */
   private ByteMap<byte[][]> row_key_literals;
 
-  /** If true, use rate of change instead of actual values. */
+  /**
+   * If true, use rate of change instead of actual values.
+   */
   private boolean rate;
 
-  /** Specifies the various options for rate calculations */
+  /**
+   * Specifies the various options for rate calculations
+   */
   private RateOptions rate_options;
-  
-  /** Aggregator function to use. */
+
+  /**
+   * Aggregator function to use.
+   */
   private Aggregator aggregator;
 
-  /** Downsampling specification to use, if any (can be {@code null}). */
+  /**
+   * Downsampling specification to use, if any (can be {@code null}).
+   */
   private DownsamplingSpecification downsampler;
 
-  /** Optional list of TSUIDs to fetch and aggregate instead of a metric */
+  /**
+   * Optional list of TSUIDs to fetch and aggregate instead of a metric
+   */
   private List<String> tsuids;
-  
-  /** An index that links this query to the original sub query */
+
+  /**
+   * An index that links this query to the original sub query
+   */
   private int query_index;
-  
-  /** Tag value filters to apply post scan */
+
+  /**
+   * Tag value filters to apply post scan
+   */
   private List<TagVFilter> filters;
-  
-  /** An object for storing stats in regarding the query. May be null */
+
+  /**
+   * An object for storing stats in regarding the query. May be null
+   */
   private QueryStats query_stats;
-  
-  /** Whether or not to match series with ONLY the given tags */
+
+  /**
+   * Whether or not to match series with ONLY the given tags
+   */
   private boolean explicit_tags;
-  
-  /** Constructor. */
+
+  /**
+   * Constructor.
+   */
   public TsdbQuery(final TSDB tsdb) {
     this.tsdb = tsdb;
     enable_fuzzy_filter = tsdb.getConfig()
-        .getBoolean("tsd.query.enable_fuzzy_filter");
+      .getBoolean("tsd.query.enable_fuzzy_filter");
   }
 
   /**
    * Sets the start time for the query
+   *
    * @param timestamp Unix epoch timestamp in seconds or milliseconds
    * @throws IllegalArgumentException if the timestamp is invalid or greater
-   * than the end time (if set)
+   *                                  than the end time (if set)
    */
   @Override
   public void setStartTime(final long timestamp) {
-    if (timestamp < 0 || ((timestamp & Const.SECOND_MASK) != 0 && 
-        timestamp > 9999999999999L)) {
+    if (timestamp < 0 || ((timestamp & Const.SECOND_MASK) != 0 &&
+      timestamp > 9999999999999L)) {
       throw new IllegalArgumentException("Invalid timestamp: " + timestamp);
     } else if (end_time != UNSET && timestamp >= getEndTime()) {
       throw new IllegalArgumentException("new start time (" + timestamp
-          + ") is greater than or equal to end time: " + getEndTime());
+        + ") is greater than or equal to end time: " + getEndTime());
     }
     start_time = timestamp;
   }
@@ -177,23 +223,25 @@ final class TsdbQuery implements Query {
   /**
    * Sets the end time for the query. If this isn't set, the system time will be
    * used when the query is executed or {@link #getEndTime} is called
+   *
    * @param timestamp Unix epoch timestamp in seconds or milliseconds
    * @throws IllegalArgumentException if the timestamp is invalid or less
-   * than the start time (if set)
+   *                                  than the start time (if set)
    */
   @Override
   public void setEndTime(final long timestamp) {
-    if (timestamp < 0 || ((timestamp & Const.SECOND_MASK) != 0 && 
-        timestamp > 9999999999999L)) {
+    if (timestamp < 0 || ((timestamp & Const.SECOND_MASK) != 0 &&
+      timestamp > 9999999999999L)) {
       throw new IllegalArgumentException("Invalid timestamp: " + timestamp);
     } else if (start_time != UNSET && timestamp <= getStartTime()) {
       throw new IllegalArgumentException("new end time (" + timestamp
-          + ") is less than or equal to start time: " + getStartTime());
+        + ") is less than or equal to start time: " + getStartTime());
     }
     end_time = timestamp;
   }
 
-  /** @return the configured end time. If the end time hasn't been set, the
+  /**
+   * @return the configured end time. If the end time hasn't been set, the
    * current system time will be stored and returned.
    */
   @Override
@@ -203,37 +251,37 @@ final class TsdbQuery implements Query {
     }
     return end_time;
   }
-  
+
   @Override
   public void setDelete(boolean delete) {
     this.delete = delete;
   }
-  
+
   @Override
   public boolean getDelete() {
     return delete;
   }
-  
+
   @Override
   public void setTimeSeries(final String metric,
-      final Map<String, String> tags,
-      final Aggregator function,
-      final boolean rate) throws NoSuchUniqueName {
+                            final Map<String, String> tags,
+                            final Aggregator function,
+                            final boolean rate) throws NoSuchUniqueName {
     setTimeSeries(metric, tags, function, rate, new RateOptions());
   }
-  
+
   @Override
   public void setTimeSeries(final String metric,
-        final Map<String, String> tags,
-        final Aggregator function,
-        final boolean rate,
-        final RateOptions rate_options)
-  throws NoSuchUniqueName {
+                            final Map<String, String> tags,
+                            final Aggregator function,
+                            final boolean rate,
+                            final RateOptions rate_options)
+    throws NoSuchUniqueName {
     if (filters == null) {
       filters = new ArrayList<TagVFilter>(tags.size());
     }
     TagVFilter.tagsToFilters(tags, filters);
-    
+
     try {
       for (final TagVFilter filter : this.filters) {
         filter.resolveTagkName(tsdb).join();
@@ -247,17 +295,17 @@ final class TsdbQuery implements Query {
       if (e instanceof DeferredGroupException) {
         // rollback to the actual case. The DGE missdirects
         Throwable ex = e.getCause();
-        while(ex != null && ex instanceof DeferredGroupException) {
+        while (ex != null && ex instanceof DeferredGroupException) {
           ex = ex.getCause();
         }
         if (ex != null) {
-          throw (RuntimeException)ex;
+          throw (RuntimeException) ex;
         }
       }
       LOG.error("Unexpected exception processing group bys", e);
       throw new RuntimeException(e);
     }
-    
+
     findGroupBys();
     this.metric = tsdb.metrics.getId(metric);
     aggregator = function;
@@ -267,19 +315,19 @@ final class TsdbQuery implements Query {
 
   @Override
   public void setTimeSeries(final List<String> tsuids,
-      final Aggregator function, final boolean rate) {
+                            final Aggregator function, final boolean rate) {
     setTimeSeries(tsuids, function, rate, new RateOptions());
   }
-  
+
   @Override
   public void setTimeSeries(final List<String> tsuids,
-      final Aggregator function, final boolean rate, 
-      final RateOptions rate_options) {
+                            final Aggregator function, final boolean rate,
+                            final RateOptions rate_options) {
     if (tsuids == null || tsuids.isEmpty()) {
       throw new IllegalArgumentException(
-          "Empty or missing TSUID list not allowed");
+        "Empty or missing TSUID list not allowed");
     }
-    
+
     String first_metric = "";
     for (final String tsuid : tsuids) {
       if (first_metric.isEmpty()) {
@@ -287,7 +335,7 @@ final class TsdbQuery implements Query {
           .toUpperCase();
         continue;
       }
-      
+
       final String metric = tsuid.substring(0, TSDB.metrics_width() * 2)
         .toUpperCase();
       if (!first_metric.equals(metric)) {
@@ -295,14 +343,14 @@ final class TsdbQuery implements Query {
           "One or more TSUIDs did not share the same metric");
       }
     }
-    
-    // the metric will be set with the scanner is configured 
+
+    // the metric will be set with the scanner is configured
     this.tsuids = tsuids;
     aggregator = function;
     this.rate = rate;
     this.rate_options = rate_options;
   }
-  
+
   /**
    * @param explicit_tags Whether or not to match only on the given tags
    * @since 2.3
@@ -310,24 +358,24 @@ final class TsdbQuery implements Query {
   public void setExplicitTags(final boolean explicit_tags) {
     this.explicit_tags = explicit_tags;
   }
-  
+
   @Override
-  public Deferred<Object> configureFromQuery(final TSQuery query, 
-      final int index) {
+  public Deferred<Object> configureFromQuery(final TSQuery query,
+                                             final int index) {
     if (query.getQueries() == null || query.getQueries().isEmpty()) {
       throw new IllegalArgumentException("Missing sub queries");
     }
     if (index < 0 || index > query.getQueries().size()) {
       throw new IllegalArgumentException("Query index was out of range");
     }
-    
+
     final TSSubQuery sub_query = query.getQueries().get(index);
     setStartTime(query.startTime());
     setEndTime(query.endTime());
     setDelete(query.getDelete());
     query_index = index;
     query_stats = query.getQueryStats();
-    
+
     // set common options
     aggregator = sub_query.aggregator();
     rate = sub_query.getRate();
@@ -338,7 +386,7 @@ final class TsdbQuery implements Query {
     downsampler = sub_query.downsamplingSpecification();
     filters = sub_query.getFilters();
     explicit_tags = sub_query.getExplicitTags();
-    
+
     // if we have tsuids set, that takes precedence
     if (sub_query.getTsuids() != null && !sub_query.getTsuids().isEmpty()) {
       tsuids = new ArrayList<String>(sub_query.getTsuids());
@@ -349,13 +397,13 @@ final class TsdbQuery implements Query {
             .toUpperCase();
           continue;
         }
-        
+
         final String metric = tsuid.substring(0, TSDB.metrics_width() * 2)
           .toUpperCase();
         if (!first_metric.equals(metric)) {
           throw new IllegalArgumentException(
-            "One or more TSUIDs did not share the same metric [" + first_metric + 
-            "] [" + metric + "]");
+            "One or more TSUIDs did not share the same metric [" + first_metric +
+              "] [" + metric + "]");
         }
       }
       return Deferred.fromResult(null);
@@ -375,8 +423,8 @@ final class TsdbQuery implements Query {
         public Deferred<Object> call(final byte[] uid) throws Exception {
           metric = uid;
           if (filters != null) {
-            final List<Deferred<byte[]>> deferreds = 
-                new ArrayList<Deferred<byte[]>>(filters.size());
+            final List<Deferred<byte[]>> deferreds =
+              new ArrayList<Deferred<byte[]>>(filters.size());
             for (final TagVFilter filter : filters) {
               deferreds.add(filter.resolveTagkName(tsdb));
             }
@@ -386,47 +434,48 @@ final class TsdbQuery implements Query {
           }
         }
       }
-      
+
       // fire off the callback chain by resolving the metric first
       return tsdb.metrics.getIdAsync(sub_query.getMetric())
-          .addCallbackDeferring(new MetricCB());
+        .addCallbackDeferring(new MetricCB());
     }
   }
-  
+
   @Override
   public void downsample(final long interval, final Aggregator downsampler,
-      final FillPolicy fill_policy) {
+                         final FillPolicy fill_policy) {
     this.downsampler = new DownsamplingSpecification(
-        interval, downsampler,fill_policy);
+      interval, downsampler, fill_policy);
   }
 
   /**
    * Sets an optional downsampling function with interpolation on this query.
-   * @param interval The interval, in milliseconds to rollup data points
+   *
+   * @param interval    The interval, in milliseconds to rollup data points
    * @param downsampler An aggregation function to use when rolling up data points
-   * @throws NullPointerException if the aggregation function is null
+   * @throws NullPointerException     if the aggregation function is null
    * @throws IllegalArgumentException if the interval is not greater than 0
    */
   @Override
   public void downsample(final long interval, final Aggregator downsampler) {
     if (downsampler == Aggregators.NONE) {
       throw new IllegalArgumentException("cannot use the NONE "
-          + "aggregator for downsampling");
+        + "aggregator for downsampling");
     }
     downsample(interval, downsampler, FillPolicy.NONE);
   }
 
   /**
-   * Populates the {@link #group_bys} and {@link #row_key_literals}'s with 
-   * values pulled from the filters. 
+   * Populates the {@link #group_bys} and {@link #row_key_literals}'s with
+   * values pulled from the filters.
    */
   private void findGroupBys() {
     if (filters == null || filters.isEmpty()) {
       return;
     }
-    
+
     row_key_literals = new ByteMap<byte[][]>();
-    
+
     Collections.sort(filters);
     final Iterator<TagVFilter> current_iterator = filters.iterator();
     final Iterator<TagVFilter> look_ahead = filters.iterator();
@@ -446,7 +495,7 @@ final class TsdbQuery implements Query {
           tagk = new byte[TSDB.tagk_width()];
           System.arraycopy(current.getTagkBytes(), 0, tagk, 0, TSDB.tagk_width());
         }
-        
+
         if (current.isGroupBy()) {
           gbs++;
         }
@@ -461,8 +510,8 @@ final class TsdbQuery implements Query {
           break;
         }
         next = look_ahead.hasNext() ? look_ahead.next() : null;
-      } while (current_iterator.hasNext() && 
-          Bytes.memcmp(tagk, current.getTagkBytes()) == 0);
+      } while (current_iterator.hasNext() &&
+        Bytes.memcmp(tagk, current.getTagkBytes()) == 0);
 
       if (gbs > 0) {
         if (group_bys == null) {
@@ -470,18 +519,18 @@ final class TsdbQuery implements Query {
         }
         group_bys.add(current.getTagkBytes());
       }
-      
+
       if (literals.size() > 0) {
-        if (literals.size() + row_key_literals_count > 
-            tsdb.getConfig().getInt("tsd.query.filter.expansion_limit")) {
-          LOG.debug("Skipping literals for " + current.getTagk() + 
-              " as it exceedes the limit");
+        if (literals.size() + row_key_literals_count >
+          tsdb.getConfig().getInt("tsd.query.filter.expansion_limit")) {
+          LOG.debug("Skipping literals for " + current.getTagk() +
+            " as it exceedes the limit");
         } else {
           final byte[][] values = new byte[literals.size()][];
           literals.keySet().toArray(values);
           row_key_literals.put(current.getTagkBytes(), values);
           row_key_literals_count += values.length;
-          
+
           for (final TagVFilter filter : literal_filters) {
             filter.setPostScan(false);
           }
@@ -491,12 +540,14 @@ final class TsdbQuery implements Query {
       }
     }
   }
+
   /**
    * Executes the query.
    * NOTE: Do not run the same query multiple times. Construct a new query with
    * the same parameters again if needed
    * TODO(cl) There are some strange occurrences when unit testing where the end
    * time, if not set, can change between calls to run()
+   *
    * @return An array of data points with one time series per array value
    */
   @Override
@@ -509,12 +560,349 @@ final class TsdbQuery implements Query {
       throw new RuntimeException("Should never be here", e);
     }
   }
-  
-  @Override
-  public Deferred<DataPoints[]> runAsync() throws HBaseException {
-    return findSpans().addCallback(new GroupByAndAggregateCB());
+
+//
+//  private Deferred<TreeMap<byte[], Span>> runRawAsync() throws HBaseException {
+//    return findSpans();
+//  }
+
+  public QueryStats getQueryStats() {
+    return query_stats;
   }
 
+  public int getQueryIndex(){
+    return query_index;
+  }
+
+  // Not like a clone, but duplicate create new query of TsdbQuery
+  private TsdbQuery duplicate(){
+    // TODO: (mildronize) manage query stats
+
+    TsdbQuery tsdbQuery = new TsdbQuery(tsdb);
+    tsdbQuery.start_time = start_time;
+    tsdbQuery.end_time = end_time;
+    tsdbQuery.aggregator = aggregator;
+    tsdbQuery.rate_options = rate_options;
+    tsdbQuery.downsampler = downsampler;
+    tsdbQuery.filters = filters;
+    tsdbQuery.explicit_tags = explicit_tags;
+    tsdbQuery.tsuids = tsuids;
+    tsdbQuery.metric = metric;
+
+    tsdbQuery.group_bys = group_bys;
+    tsdbQuery.row_key_literals = row_key_literals;
+    tsdbQuery.query_stats = query_stats;
+    tsdbQuery.query_index = query_index;
+
+    return tsdbQuery;
+  }
+
+  public Deferred<TreeMap<byte[], Span>> findCache(final ArrayList<CacheFragment> fragments, final int cacheFragmentId){
+    // finally the result is one object!
+    final long findCacheStart = DateTime.nanoTime();
+    final CacheFragment fragment = fragments.get(cacheFragmentId);
+    final ArrayList<Deferred<byte[]>> deferreds = new ArrayList<Deferred<byte[]>>();
+    final byte[] result_key;
+
+    final TsdbQuery self = this;
+    class ForwardToFindSpan{
+      public Deferred<TreeMap<byte[], Span>> run(){
+        LOG.info("findCache: forwarding action to findSpan");
+        fragment.setFailed(true);
+        TsdbQuery fragmentTsdbQuery = self.duplicate();
+        fragmentTsdbQuery.setStartTime(fragment.getStartTime());
+        fragmentTsdbQuery.setEndTime(fragment.getEndTime());
+        return fragmentTsdbQuery.findSpans();
+      }
+    }
+
+    final MemcachedClient memcachedClient;
+    try {
+      memcachedClient = tsdb.cache.createMemcachedConnection();
+    }catch(IOException e){
+      LOG.warn("findCache: Can't connect to memcached server");
+      return new ForwardToFindSpan().run();
+    }
+
+    class ErrorCB implements Callback<Deferred<TreeMap<byte[], Span>>, Exception> {
+      public Deferred<TreeMap<byte[], Span>> call(final Exception e){
+        try{
+          memcachedClient.shutdown();
+        }catch (Exception ex){
+          LOG.warn("Can't shutdown memcache connect, ignored");
+        }
+        LOG.info("findCache.ErrorCB.call: Can't get data from Memcached");
+        return new ForwardToFindSpan().run();
+      }
+    }
+
+    // get metrics
+    final short metric_width = tsdb.metrics.width();
+
+    // set the metric UID based on the TSUIDs if given, or the metric UID
+    if (tsuids != null && !tsuids.isEmpty()) {
+      final String tsuid = tsuids.get(0);
+      final String metric_uid = tsuid.substring(0, metric_width * 2);
+      metric = UniqueId.stringToUid(metric_uid);
+    }
+
+    // convert tags to array of bytes
+//    final short name_width = tsdb.tag_names.width();
+//    final short value_width = tsdb.tag_values.width();
+//    final short tag_bytes = (short) (name_width + value_width);
+    final short metric_bytes = (short) (Const.SALT_WIDTH()
+                                          + tsdb.metrics.width());
+    // get name of
+    ArrayList<byte[]> tagUids = new ArrayList<byte[]>();
+    // get tags
+
+    // The filters that should trigger a tag resolution. If this list
+    // is empty due to literals or a wildcard star
+
+    // This code support only literal or filter !
+    // one tag k and tag v
+    // in simple case only
+    // Read more in TagVLiteralOrFilter.java
+    if (filters != null) {
+      for (final TagVFilter filter : filters) {
+        // Default true, set to false in finsSpan method only
+//        LOG.debug("FILTER: " + filter.toString());
+//        LOG.debug("FILTER: postScan" + filter.postScan());
+//        LOG.debug("FILTER: type?" + (filter.getType() == "literal_or"));
+        // TODO: postScan, recheck of postScan is needed to use?
+        if (filter.getType() == "literal_or") {
+          if (LOG.isDebugEnabled())LOG.debug("findCache: OK FILTER: " + filter.toString());
+          byte[] key_tmp = filter.getTagkBytes();
+          List<byte[]> tagVUids = filter.getTagVUids();
+          if(tagVUids.size() != 1){
+            String msg = "findCache: Cache support only one tag k and tag v";
+            LOG.warn(msg);
+            return new ForwardToFindSpan().run();
+          }
+          tagUids.add(key_tmp);
+          tagUids.add(tagVUids.get(0));
+        }
+      }
+    } else {
+      String msg = "findCache: Tags error or no filter `literal_or`";
+      LOG.warn(msg);
+      return new ForwardToFindSpan().run();
+    }
+    // TODO: Test this function
+    byte[] tags = tsdb.cache.arrayListToBytes(tagUids);
+    if(tags.length == 0){
+      String msg = "findCache: Tags should be defined!";
+      LOG.warn(msg);
+      return new ForwardToFindSpan().run();
+    }
+    byte[] keyBytesTemplate = new byte[metric_bytes + Const.TIMESTAMP_BYTES + tags.length];
+//    LOG.debug("findCache: keyBytesTemplate: " + Arrays.toString(keyBytesTemplate));
+    // add key byte
+//    LOG.debug("findCache: Add metric into template: " + Arrays.toString(metric));
+    System.arraycopy(metric, 0, keyBytesTemplate, 0 , metric_bytes);
+//    LOG.debug("findCache: keyBytesTemplate: " + Arrays.toString(keyBytesTemplate));
+    // add tag byte
+//    LOG.debug("findCache: Add tags into template: " + Arrays.toString(tags));
+    System.arraycopy(tags, 0, keyBytesTemplate, metric_bytes + Const.TIMESTAMP_BYTES , tags.length);
+    if (LOG.isDebugEnabled())LOG.debug("findCache: keyBytesTemplate: " + Arrays.toString(keyBytesTemplate));
+    final ArrayList<byte[]> keys = tsdb.cache.processKeyCache(fragment, keyBytesTemplate, metric_bytes);
+    // Select first key of span as a key of the result
+    if(keys.size() == 0){
+      // TODO: forward action to findSpan
+      String msg = "findCache: Can't build key of cache: Cache.processKeyCache return empty lists of key";
+      LOG.warn(msg);
+      return new ForwardToFindSpan().run();
+    }
+    result_key = keys.get(0);
+
+    for (final byte[] key : keys) {
+      deferreds.add(tsdb.cache.getMemcachedAsync(memcachedClient, tsdb.cache.encodeKey(key)));
+    }
+
+    class GroupFinished implements Callback<TreeMap<byte[], Span>, ArrayList<byte[]>> {
+      @Override
+      public TreeMap<byte[], Span> call(final ArrayList<byte[]> raw_results) throws Exception{
+        // merge each TreeMap together
+
+        final short metric_width = tsdb.metrics.width();
+        final TreeMap<byte[], Span> result_spans = // The key is a row key from HBase.
+          new TreeMap<byte[], Span>(new SpanCmp(
+            (short)(Const.SALT_WIDTH() + metric_width)));
+        if (LOG.isDebugEnabled())LOG.debug("findCache.GroupFinisih.call: Span size (num of rowSeq): " + raw_results.size());
+        // mildronize: debug
+//        final FileWriter fileWriter;
+//        final PrintWriter printWriter;
+//        fileWriter = new FileWriter("/var/log/opentsdb/get." + System.currentTimeMillis());
+//        printWriter = new PrintWriter(fileWriter);
+        for(int i = 0; i < raw_results.size(); i++){
+          if(raw_results.get(i) == null) throw new Exception("Get null data");
+//          LOG.debug("Raw of Cache: " + Arrays.toString(keys.get(i)) + " | " + raw_results.get(i).length + " bytes");
+          // mildronize: debug
+//          printWriter.println(tsdb.cache.encodeKey(keys.get(i))+"#("+raw_results.get(i).length +")#"+ Arrays.toString(raw_results.get(i)) +"$");
+        }
+        long deserializeStart = DateTime.nanoTime();
+        Span resultSpan = tsdb.cache.deserializeToSpan(raw_results);
+        if (query_stats != null)
+          query_stats.addCacheStat(cacheFragmentId, QueryStat.CACHE_UNSERIALIZATION_TIME, DateTime.nanoTime() - deserializeStart);
+
+        result_spans.put(result_key, resultSpan);
+        memcachedClient.shutdown();
+//        printWriter.close();
+        if (query_stats != null)
+        query_stats.addCacheStat(cacheFragmentId, QueryStat.FIND_CACHE_TIME, DateTime.nanoTime() - findCacheStart);
+        return result_spans;
+      }
+
+    }
+
+
+
+    return Deferred.groupInOrder(deferreds)
+      .addCallback(new GroupFinished())
+      .addErrback(new ErrorCB());
+  }
+
+  private Deferred<TreeMap<byte[], Span>> buildFragmentAsync(final ArrayList<CacheFragment> cacheFragments){
+    final long scannerWithCacheStart = DateTime.nanoTime();
+    final TsdbQuery self = this;
+    final ArrayList<Deferred<TreeMap<byte[], Span>>> deferreds = new ArrayList<Deferred<TreeMap<byte[], Span>>>();
+
+    for (int i=0; i<cacheFragments.size() ;i++){
+
+      if (cacheFragments.get(i).isInCache()) {  // true in cache
+        LOG.info("buildFragmentAsync: Starting findCache for CacheFragment(" + i + ") -> " + cacheFragments.get(i));
+        if (query_stats!=null){
+          query_stats.addCacheStat(i, QueryStat.CACHE_FRAGMENTS_TYPE, 1);
+        }
+        deferreds.add(findCache(cacheFragments, i));
+      }else{
+        if (query_stats!=null){
+          query_stats.addCacheStat(i, QueryStat.CACHE_FRAGMENTS_TYPE, 0);
+        }
+        TsdbQuery fragmentTsdbQuery = this.duplicate();
+        fragmentTsdbQuery.setStartTime(cacheFragments.get(i).getStartTime());
+        fragmentTsdbQuery.setEndTime(cacheFragments.get(i).getEndTime());
+        LOG.info("buildFragmentAsync: Starting findSpans for CacheFragment(" + i + ") -> " + cacheFragments.get(i));
+        deferreds.add(fragmentTsdbQuery.findSpans(i));
+      }
+    }
+    class MergeFragmentsCB implements Callback<TreeMap<byte[], Span>, ArrayList<TreeMap<byte[], Span>>> {
+      @Override
+      public TreeMap<byte[], Span> call(final ArrayList<TreeMap<byte[], Span>> spans) throws Exception{
+        // merge each TreeMap together
+        long cacheMergeStart = DateTime.nanoTime();
+//        LOG.error(self.getQueryStats() + "");
+        if (self.getQueryStats() != null) {
+          for (int i = 0; i < cacheFragments.size(); i++) {
+            self.getQueryStats().addCacheStat(i, QueryStat.IS_CACHE_FRAGMENTS_FAILED, cacheFragments.get(i).isFailed() ? 1 : 0);
+          }
+        }
+        final short metric_width = tsdb.metrics.width();
+        final TreeMap<byte[], Span> result_spans = // The key is a row key from HBase.
+          new TreeMap<byte[], Span>(new SpanCmp(
+            (short)(Const.SALT_WIDTH() + metric_width)));
+
+        if (LOG.isDebugEnabled())LOG.debug("buildFragmentAsync.MergeFragmentsCB.call: Merge raw data -> GroupFinished: Span size: " + spans.size());
+        // Remove span if it's null
+        Iterator<TreeMap<byte[], Span>> spansIterator = spans.iterator();
+        while (spansIterator.hasNext()) {
+          if (spansIterator.next() == null )
+            spansIterator.remove();
+        }
+        if(spans.size() <= 0)
+          return result_spans;
+        byte[] result_key = spans.get(0).entrySet().iterator().next().getKey();
+        Span result_span = new Span(tsdb);
+        Set<RowSeq> rowSeqs_result =  new LinkedHashSet<RowSeq>();
+        for(final TreeMap<byte[], Span> span : spans) {
+          if (span == null) continue;
+          for (Map.Entry<byte[], Span> element : span.entrySet())
+            if (LOG.isDebugEnabled())LOG.debug("buildFragmentAsync.MergeFragmentsCB.call: Fragment (Span) : " + element.getKey() + "["+ Arrays.toString(element.getKey()) + "]| Value: " + element.getValue().getRows().size() + " rows") ;
+
+          for(Map.Entry<byte[], Span> entry : span.entrySet()) {
+//            result_span.addAll(entry.getValue().getRows());
+            Set<RowSeq> rowSeqs =  new LinkedHashSet<RowSeq>(entry.getValue().getRows());
+            rowSeqs_result.addAll(rowSeqs);
+          }
+        }
+
+        result_span.addAll(new ArrayList<RowSeq>(rowSeqs_result));
+        result_spans.put(result_key, result_span);
+
+        if (LOG.isDebugEnabled())
+          for (Map.Entry<byte[], Span> element : result_spans.entrySet())
+            if (LOG.isDebugEnabled())LOG.debug("buildFragmentAsync.MergeFragmentsCB.call: Merged Span : " + element.getKey() + "["+ Arrays.toString(element.getKey()) + "]| Value: " + element.getValue().getRows().size() + " rows");
+
+        if(self.getQueryStats() != null ) {
+          self.getQueryStats().addStat(self.getQueryIndex(),
+            QueryStat.CACHE_MERGE_TIME, DateTime.nanoTime() - cacheMergeStart);
+          self.getQueryStats().addStat(self.getQueryIndex(),
+            QueryStat.CACHE_SCANNER_TIME, DateTime.nanoTime() - scannerWithCacheStart);
+        }
+        return result_spans;
+
+      }
+      @Override
+      public String toString() {
+        return "Merge TreeMap (HBase row) callback";
+      }
+    }
+
+    class StoreCachedCB implements Callback<ArrayList<TreeMap<byte[], Span>>, ArrayList<TreeMap<byte[], Span>>> {
+      @Override
+      public ArrayList<TreeMap<byte[], Span>> call(final ArrayList<TreeMap<byte[], Span>> spans) throws Exception {
+
+        final ArrayList<Deferred<Boolean>> deferreds = new ArrayList<Deferred<Boolean>>();
+
+        for (int i = 0; i < spans.size(); i++) {
+          if (!cacheFragments.get(i).isInCache() || cacheFragments.get(i).isFailed()) {  // true in cache
+            // store in memcache
+            LOG.info("buildFragmentAsync: Starting store CacheFragment(" + i + ") -> " + cacheFragments.get(i));
+            try {
+              deferreds.add(tsdb.cache.storeCache(cacheFragments, spans, query_stats, i));
+            }catch (Exception e){
+              LOG.warn("buildFragmentAsync.StoreCB.call: "+ e.getMessage());
+            }
+          }
+        }
+
+        try {
+          Deferred.groupInOrder(deferreds).join();
+        } catch (Exception e) {
+          LOG.warn("buildFragmentAsync.StoreCB.call: Exception");
+        }
+        // and by pass the result to next callback
+        return spans;
+      }
+
+    }
+
+    class ErrorCB implements Callback<Object, Exception> {
+      public Object call(final Exception e) throws Exception {
+        throw new BadRequestException(HttpResponseStatus.BAD_REQUEST,
+            e.getMessage(), "Can't get data", e);
+      }
+    }
+
+    return Deferred.groupInOrder(deferreds)
+      .addCallback(new StoreCachedCB())
+      .addCallback(new MergeFragmentsCB())
+      .addErrback(new ErrorCB());
+  }
+
+  @Override
+  public Deferred<DataPoints[]> runAsync() throws HBaseException {
+    scan_cache_start_time = DateTime.nanoTime();
+    return buildFragmentAsync(tsdb.cache.buildCacheFragments(this))
+      .addCallback(new GroupByAndAggregateCB());
+    // Without Cache
+//    return findSpans().addCallback(new GroupByAndAggregateCB());
+  }
+
+
+  private Deferred<TreeMap<byte[], Span>> findSpans() throws HBaseException {
+   return findSpans(0);
+  }
   /**
    * Finds all the {@link Span}s that match this query.
    * This is what actually scans the HBase table and loads the data into
@@ -526,17 +914,17 @@ final class TsdbQuery implements Query {
    * perform the search.
    * @throws IllegalArgumentException if bad data was retrieved from HBase.
    */
-  private Deferred<TreeMap<byte[], Span>> findSpans() throws HBaseException {
+  private Deferred<TreeMap<byte[], Span>> findSpans(final int cacheFragmentId) throws HBaseException {
     final short metric_width = tsdb.metrics.width();
     final TreeMap<byte[], Span> spans = // The key is a row key from HBase.
       new TreeMap<byte[], Span>(new SpanCmp(
           (short)(Const.SALT_WIDTH() + metric_width)));
-    
+
     // Copy only the filters that should trigger a tag resolution. If this list
     // is empty due to literals or a wildcard star, then we'll save a TON of
     // UID lookups
     final List<TagVFilter> scanner_filters;
-    if (filters != null) {   
+    if (filters != null) {
       scanner_filters = new ArrayList<TagVFilter>(filters.size());
       for (final TagVFilter filter : filters) {
         if (filter.postScan()) {
@@ -546,7 +934,7 @@ final class TsdbQuery implements Query {
     } else {
       scanner_filters = null;
     }
-    
+
     if (Const.SALT_WIDTH() > 0) {
       final List<Scanner> scanners = new ArrayList<Scanner>(Const.SALT_BUCKETS());
       for (int i = 0; i < Const.SALT_BUCKETS(); i++) {
@@ -556,7 +944,7 @@ final class TsdbQuery implements Query {
       return new SaltScanner(tsdb, metric, scanners, spans, scanner_filters,
           delete, query_stats, query_index).scan();
     }
-    
+
     scan_start_time = DateTime.nanoTime();
     final Scanner scanner = getScanner();
     if (query_stats != null) {
@@ -564,7 +952,7 @@ final class TsdbQuery implements Query {
     }
     final Deferred<TreeMap<byte[], Span>> results =
       new Deferred<TreeMap<byte[], Span>>();
-    
+
     /**
     * Scanner callback executed recursively each time we get a set of data
     * from storage. This is responsible for determining what columns are
@@ -574,7 +962,7 @@ final class TsdbQuery implements Query {
     */
     final class ScannerCB implements Callback<Object,
       ArrayList<ArrayList<KeyValue>>> {
-      
+
       int nrows = 0;
       boolean seenAnnotation = false;
       long scanner_start = DateTime.nanoTime();
@@ -586,13 +974,13 @@ final class TsdbQuery implements Query {
       private long fetch_start = 0;      // reset each time we send an RPC to HBase
       private long fetch_time = 0;       // cumulation of time waiting on HBase
       private long uid_resolve_time = 0; // cumulation of time resolving UIDs
-      private long uids_resolved = 0; 
+      private long uids_resolved = 0;
       private long compaction_time = 0;  // cumulation of time compacting
       private long dps_pre_filter = 0;
       private long rows_pre_filter = 0;
       private long dps_post_filter = 0;
       private long rows_post_filter = 0;
-      
+
       /** Error callback that will capture an exception from AsyncHBase and store
        * it so we can bubble it up to the caller.
        */
@@ -604,7 +992,7 @@ final class TsdbQuery implements Query {
           return null;
         }
       }
-      
+
       /**
       * Starts the scanner and is called recursively to fetch the next set of
       * rows from the scanner.
@@ -615,7 +1003,7 @@ final class TsdbQuery implements Query {
          fetch_start = DateTime.nanoTime();
          return scanner.nextRows().addCallback(this).addErrback(new ErrorCB());
        }
-  
+
       /**
       * Loops through each row of the scanner results and parses out data
       * points and optional meta data
@@ -633,19 +1021,19 @@ final class TsdbQuery implements Query {
              close(null);
              return null;
            }
-           
+
            if (timeout > 0 && DateTime.msFromNanoDiff(
                DateTime.nanoTime(), scanner_start) > timeout) {
              throw new InterruptedException("Query timeout exceeded!");
            }
-           
+
            rows_pre_filter += rows.size();
-           
+
            // used for UID resolution if a filter is involved
-           final List<Deferred<Object>> lookups = 
-               filters != null && !filters.isEmpty() ? 
+           final List<Deferred<Object>> lookups =
+               filters != null && !filters.isEmpty() ?
                    new ArrayList<Deferred<Object>>(rows.size()) : null;
-               
+
            for (final ArrayList<KeyValue> row : rows) {
              final byte[] key = row.get(0).key();
              if (Bytes.memcmp(metric, key, 0, metric_width) != 0) {
@@ -655,7 +1043,7 @@ final class TsdbQuery implements Query {
                    + " our scanner (" + scanner + ")! " + row + " does not start"
                    + " with " + Arrays.toString(metric));
              }
-             
+
              // calculate estimated data point count. We don't want to deserialize
              // the byte arrays so we'll just get a rough estimate of compacted
              // columns.
@@ -664,7 +1052,7 @@ final class TsdbQuery implements Query {
                  if (kv.qualifier().length == 2 || kv.qualifier().length == 4) {
                    ++dps_pre_filter;
                  } else {
-                   // for now we'll assume that all compacted columns are of the 
+                   // for now we'll assume that all compacted columns are of the
                    // same precision. This is likely incorrect.
                    if (Internal.inMilliseconds(kv.qualifier())) {
                      dps_pre_filter += (kv.qualifier().length / 4);
@@ -685,7 +1073,7 @@ final class TsdbQuery implements Query {
                  }
                }
              }
-             
+
              // If any filters have made it this far then we need to resolve
              // the row key UIDs to their names for string comparison. We'll
              // try to avoid the resolution with some sets but we may dupe
@@ -694,19 +1082,19 @@ final class TsdbQuery implements Query {
              // TODO - byte set instead of a string for the uid may be faster
              if (scanner_filters != null && !scanner_filters.isEmpty()) {
                lookups.clear();
-               final String tsuid = 
-                   UniqueId.uidToString(UniqueId.getTSUIDFromKey(key, 
+               final String tsuid =
+                   UniqueId.uidToString(UniqueId.getTSUIDFromKey(key,
                    TSDB.metrics_width(), Const.TIMESTAMP_BYTES));
                if (skips.contains(tsuid)) {
                  continue;
                }
                if (!keepers.contains(tsuid)) {
                  final long uid_start = DateTime.nanoTime();
-                 
+
                  /** CB to called after all of the UIDs have been resolved */
                  class MatchCB implements Callback<Object, ArrayList<Boolean>> {
                    @Override
-                   public Object call(final ArrayList<Boolean> matches) 
+                   public Object call(final ArrayList<Boolean> matches)
                        throws Exception {
                      for (final boolean matched : matches) {
                        if (!matched) {
@@ -735,11 +1123,11 @@ final class TsdbQuery implements Query {
                      for (final TagVFilter filter : scanner_filters) {
                        matches.add(filter.match(tags));
                      }
-                     
+
                      return Deferred.group(matches);
                    }
                  }
-    
+
                  lookups.add(Tags.getTagsAsync(tsdb, key)
                      .addCallbackDeferring(new GetTagsCB())
                      .addBoth(new MatchCB()));
@@ -769,7 +1157,7 @@ final class TsdbQuery implements Query {
            return null;
          }
        }
-       
+
        /**
         * Finds or creates the span for this row, compacts it and stores it.
         * @param key The row key to use for fetching the span
@@ -781,7 +1169,7 @@ final class TsdbQuery implements Query {
            final DeleteRequest del = new DeleteRequest(tsdb.dataTable(), key);
            tsdb.getClient().delete(del);
          }
-         
+
          // calculate estimated data point count. We don't want to deserialize
          // the byte arrays so we'll just get a rough estimate of compacted
          // columns.
@@ -790,7 +1178,7 @@ final class TsdbQuery implements Query {
              if (kv.qualifier().length == 2 || kv.qualifier().length == 4) {
                ++dps_post_filter;
              } else {
-               // for now we'll assume that all compacted columns are of the 
+               // for now we'll assume that all compacted columns are of the
                // same precision. This is likely incorrect.
                if (Internal.inMilliseconds(kv.qualifier())) {
                  dps_post_filter += (kv.qualifier().length / 4);
@@ -811,14 +1199,14 @@ final class TsdbQuery implements Query {
              }
            }
          }
-         
+
          Span datapoints = spans.get(key);
          if (datapoints == null) {
            datapoints = new Span(tsdb);
            spans.put(key, datapoints);
          }
          final long compaction_start = DateTime.nanoTime();
-         final KeyValue compacted = 
+         final KeyValue compacted =
            tsdb.compact(row, datapoints.getAnnotations());
          compaction_time += (DateTime.nanoTime() - compaction_start);
          seenAnnotation |= !datapoints.getAnnotations().isEmpty();
@@ -827,44 +1215,51 @@ final class TsdbQuery implements Query {
            ++nrows;
          }
        }
-     
+
        void close(final Exception e) {
          scanner.close();
-         
-         if (query_stats != null) {
-           query_stats.addScannerStat(query_index, index, 
-               QueryStat.SCANNER_TIME, DateTime.nanoTime() - scan_start_time);
 
+         if (query_stats != null) {
+           query_stats.addScannerStat(query_index, index,
+               QueryStat.SCANNER_TIME, DateTime.nanoTime() - scan_start_time);
+          // Cache stat
+           query_stats.addCacheStat(cacheFragmentId,
+             QueryStat.FIND_SPAN_TIME, DateTime.nanoTime() - scan_start_time);
+           query_stats.addCacheStat(cacheFragmentId,
+             QueryStat.HBASE_TIME, fetch_time);
+           query_stats.addCacheStat(cacheFragmentId,
+             QueryStat.COMPACTION_TIME, compaction_time);
            // Scanner Stats
            /* Uncomment when AsyncHBase has this feature:
-           query_stats.addScannerStat(query_index, index, 
+           query_stats.addScannerStat(query_index, index,
                QueryStat.ROWS_FROM_STORAGE, scanner.getRowsFetched());
-           query_stats.addScannerStat(query_index, index, 
+           query_stats.addScannerStat(query_index, index,
                QueryStat.COLUMNS_FROM_STORAGE, scanner.getColumnsFetched());
-           query_stats.addScannerStat(query_index, index, 
+           query_stats.addScannerStat(query_index, index,
                QueryStat.BYTES_FROM_STORAGE, scanner.getBytesFetched()); */
-           query_stats.addScannerStat(query_index, index, 
+           query_stats.addScannerStat(query_index, index,
                QueryStat.HBASE_TIME, fetch_time);
-           query_stats.addScannerStat(query_index, index, 
+           query_stats.addScannerStat(query_index, index,
                QueryStat.SUCCESSFUL_SCAN, e == null ? 1 : 0);
-           
+
            // Post Scan stats
-           query_stats.addScannerStat(query_index, index, 
+           query_stats.addScannerStat(query_index, index,
                QueryStat.ROWS_PRE_FILTER, rows_pre_filter);
            query_stats.addScannerStat(query_index, index,
                QueryStat.DPS_PRE_FILTER, dps_pre_filter);
-           query_stats.addScannerStat(query_index, index, 
+           query_stats.addScannerStat(query_index, index,
                QueryStat.ROWS_POST_FILTER, rows_post_filter);
            query_stats.addScannerStat(query_index, index,
                QueryStat.DPS_POST_FILTER, dps_post_filter);
-           query_stats.addScannerStat(query_index, index, 
+           query_stats.addScannerStat(query_index, index,
                QueryStat.SCANNER_UID_TO_STRING_TIME, uid_resolve_time);
-           query_stats.addScannerStat(query_index, index, 
+           query_stats.addScannerStat(query_index, index,
                QueryStat.UID_PAIRS_RESOLVED, uids_resolved);
-           query_stats.addScannerStat(query_index, index, 
+           query_stats.addScannerStat(query_index, index,
                QueryStat.COMPACTION_TIME, compaction_time);
+
          }
-         
+
          if (e != null) {
            results.callback(e);
          } else if (nrows < 1 && !seenAnnotation) {
@@ -883,9 +1278,9 @@ final class TsdbQuery implements Query {
   * Callback that should be attached the the output of
   * {@link TsdbQuery#findSpans} to group and sort the results.
   */
-  private class GroupByAndAggregateCB implements 
+  private class GroupByAndAggregateCB implements
     Callback<DataPoints[], TreeMap<byte[], Span>>{
-    
+
     /**
     * Creates the {@link SpanGroup}s to form the final results of this query.
     * @param spans The {@link Span}s found for this query ({@link #findSpans}).
@@ -893,35 +1288,75 @@ final class TsdbQuery implements Query {
     * @return A possibly empty array of {@link SpanGroup}s built according to
     * any 'GROUP BY' formulated in this query.
     */
+    public void check_duplicate_row(ArrayList<RowSeq> rowSeqs){
+      Set<RowSeq> set =  new LinkedHashSet<RowSeq>();
+      for( final RowSeq rowSeq: rowSeqs){
+        set.add(rowSeq);
+      }
+      if(set.size() < rowSeqs.size()){
+        LOG.error("GroupByAndAggregateCB: There are duplicate_row");
+      }
+      if (LOG.isDebugEnabled())LOG.debug("GroupByAndAggregateCB: set:" + set.size() + " original: " + rowSeqs.size());
+    }
+
     @Override
     public DataPoints[] call(final TreeMap<byte[], Span> spans) throws Exception {
+
+      // Mildronize: Debug
+//      FileWriter fileWriter = new FileWriter("/var/log/opentsdb/RowSeq." + System.currentTimeMillis());
+//      PrintWriter printWriter = new PrintWriter(fileWriter);
+      if (LOG.isDebugEnabled())
+        for (Map.Entry<byte[], Span> entry : spans.entrySet()) {
+          LOG.debug("GroupByAndAggregateCB (Post-processing): Key: " + entry.getKey() + ". Value: " + entry.getValue().getRows().size() + " rows");
+//        check_duplicate_row(entry.getValue().getRows());
+//        for (final RowSeq rowSeq: entry.getValue().getRows()) {
+//          String msg = Arrays.toString(rowSeq.getKey()) + " Value: " + Arrays.toString(rowSeq.getValues())+ " Qualifier: " + Arrays.toString(rowSeq.getQualifiers())+ " $";
+//          printWriter.println(msg);
+//          LOG.debug(msg);
+//        }
+     }
+//      printWriter.close();
+
+
+//      for (final TagVFilter filter : filters) {
+//        // Default true, set to false in finsSpan method only
+////        LOG.debug(filter.toString());
+////        LOG.debug(Arrays.toString(filter.getTagkBytes()));
+//        List<byte[]> tagVUids = filter.getTagVUids();
+//        for (final byte[] tagVUid: tagVUids){
+//          LOG.debug(Arrays.toString(tagVUid));
+//        }
+//      }
+
       if (query_stats != null) {
-        query_stats.addStat(query_index, QueryStat.QUERY_SCAN_TIME, 
+        query_stats.addStat(query_index, QueryStat.QUERY_SCAN_TIME,
                 (System.nanoTime() - TsdbQuery.this.scan_start_time));
+        query_stats.addStat(query_index, QueryStat.CACHE_QUERY_SCAN_TIME,
+          (System.nanoTime() - TsdbQuery.this.scan_cache_start_time));
       }
-      
+
       if (spans == null || spans.size() <= 0) {
         if (query_stats != null) {
           query_stats.addStat(query_index, QueryStat.GROUP_BY_TIME, 0);
         }
         return NO_RESULT;
       }
-      
+
       // The raw aggregator skips group bys and ignores downsampling
       if (aggregator == Aggregators.NONE) {
         final SpanGroup[] groups = new SpanGroup[spans.size()];
         int i = 0;
         for (final Span span : spans.values()) {
           final SpanGroup group = new SpanGroup(
-              tsdb, 
+              tsdb,
               getScanStartTimeSeconds(),
               getScanEndTimeSeconds(),
-              null, 
-              rate, 
+              null,
+              rate,
               rate_options,
               aggregator,
               downsampler,
-              getStartTime(), 
+              getStartTime(),
               getEndTime(),
               query_index);
           group.add(span);
@@ -929,7 +1364,7 @@ final class TsdbQuery implements Query {
         }
         return groups;
       }
-      
+
       if (group_bys == null) {
         // We haven't been asked to find groups, so let's put all the spans
         // together in the same group.
@@ -940,7 +1375,7 @@ final class TsdbQuery implements Query {
                                               rate, rate_options,
                                               aggregator,
                                               downsampler,
-                                              getStartTime(), 
+                                              getStartTime(),
                                               getEndTime(),
                                               query_index);
         if (query_stats != null) {
@@ -948,7 +1383,7 @@ final class TsdbQuery implements Query {
         }
         return new SpanGroup[] { group };
       }
-  
+
       // Maps group value IDs to the SpanGroup for those values. Say we've
       // been asked to group by two things: foo=* bar=* Then the keys in this
       // map will contain all the value IDs combinations we've seen. If the
@@ -990,7 +1425,7 @@ final class TsdbQuery implements Query {
                                    getScanEndTimeSeconds(),
                                    null, rate, rate_options, aggregator,
                                    downsampler,
-                                   getStartTime(), 
+                                   getStartTime(),
                                    getEndTime(),
                                    query_index);
           // Copy the array because we're going to keep `group' and overwrite
@@ -1013,8 +1448,8 @@ final class TsdbQuery implements Query {
 
   /**
    * Returns a scanner set for the given metric (from {@link #metric} or from
-   * the first TSUID in the {@link #tsuids}s list. If one or more tags are 
-   * provided, it calls into {@link #createAndSetFilter} to setup a row key 
+   * the first TSUID in the {@link #tsuids}s list. If one or more tags are
+   * provided, it calls into {@link #createAndSetFilter} to setup a row key
    * filter. If one or more TSUIDs have been provided, it calls into
    * {@link #createAndSetTSUIDFilter} to setup a row key filter.
    * @return A scanner to use for fetching data points
@@ -1022,11 +1457,11 @@ final class TsdbQuery implements Query {
   protected Scanner getScanner() throws HBaseException {
     return getScanner(0);
   }
-  
+
   /**
    * Returns a scanner set for the given metric (from {@link #metric} or from
-   * the first TSUID in the {@link #tsuids}s list. If one or more tags are 
-   * provided, it calls into {@link #createAndSetFilter} to setup a row key 
+   * the first TSUID in the {@link #tsuids}s list. If one or more tags are
+   * provided, it calls into {@link #createAndSetFilter} to setup a row key
    * filter. If one or more TSUIDs have been provided, it calls into
    * {@link #createAndSetTSUIDFilter} to setup a row key filter.
    * @param salt_bucket The salt bucket to scan over when salting is enabled.
@@ -1034,21 +1469,21 @@ final class TsdbQuery implements Query {
    */
   protected Scanner getScanner(final int salt_bucket) throws HBaseException {
     final short metric_width = tsdb.metrics.width();
-    
+
     // set the metric UID based on the TSUIDs if given, or the metric UID
     if (tsuids != null && !tsuids.isEmpty()) {
       final String tsuid = tsuids.get(0);
       final String metric_uid = tsuid.substring(0, metric_width * 2);
       metric = UniqueId.stringToUid(metric_uid);
     }
-    
+
     // We search at least one row before and one row after the start & end
     // time we've been given as it's quite likely that the exact timestamp
     // we're looking for is in the middle of a row.  Plus, a number of things
     // rely on having a few extra data points before & after the exact start
     // & end dates in order to do proper rate calculation or downsampling near
     // the "edges" of the graph.
-    final Scanner scanner = QueryUtil.getMetricScanner(tsdb, salt_bucket, metric, 
+    final Scanner scanner = QueryUtil.getMetricScanner(tsdb, salt_bucket, metric,
         (int) getScanStartTimeSeconds(), end_time == UNSET
         ? -1  // Will scan until the end (0xFFF...).
         : (int) getScanEndTimeSeconds(), tsdb.table, TSDB.FAMILY());
@@ -1151,13 +1586,13 @@ final class TsdbQuery implements Query {
    * @param scanner The scanner on which to add the filter.
    */
   private void createAndSetFilter(final Scanner scanner) {
-    QueryUtil.setDataTableScanFilter(scanner, group_bys, row_key_literals, 
-        explicit_tags, enable_fuzzy_filter, 
+    QueryUtil.setDataTableScanFilter(scanner, group_bys, row_key_literals,
+        explicit_tags, enable_fuzzy_filter,
         (end_time == UNSET
         ? -1  // Will scan until the end (0xFFF...).
         : (int) getScanEndTimeSeconds()));
   }
-  
+
   /**
    * Sets the server-side regexp filter on the scanner.
    * This will compile a list of the tagk/v pairs for the TSUIDs to prevent
@@ -1171,7 +1606,7 @@ final class TsdbQuery implements Query {
     }
     scanner.setKeyRegexp(regex, CHARSET);
   }
-  
+
   @Override
   public String toString() {
     final StringBuilder buf = new StringBuilder();
@@ -1288,26 +1723,26 @@ final class TsdbQuery implements Query {
     static long getDownsampleIntervalMs(final TsdbQuery query) {
       return query.downsampler.getInterval();
     }
-  
+
     static byte[] getMetric(final TsdbQuery query) {
       return query.metric;
     }
-    
+
     static RateOptions getRateOptions(final TsdbQuery query) {
       return query.rate_options;
     }
-    
+
     static List<TagVFilter> getFilters(final TsdbQuery query) {
       return query.filters;
     }
-    
+
     static ArrayList<byte[]> getGroupBys(final TsdbQuery query) {
       return query.group_bys;
     }
-    
+
     static ByteMap<byte[][]> getRowKeyLiterals(final TsdbQuery query) {
       return query.row_key_literals;
     }
-  
+
   }
 }

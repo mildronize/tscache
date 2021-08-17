@@ -1,0 +1,1 @@
+bash "build-aux/gen_build_data.sh" %*
